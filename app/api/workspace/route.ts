@@ -88,23 +88,30 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
-    if (action === "generateAccessCode") {
-      if (user.role !== "admin") return Response.json({ error: "Administrator access required" }, { status: 403 });
-      const studentEmail=clean(data.studentEmail,160).toLowerCase(), courseId=Number(data.courseId), planType=clean(data.planType,40), sectionType=planType==="full_curriculum"?"full_curriculum":clean(data.sectionType,40)||planType;
-      const sectionLimit=Math.min(200,Math.max(1,Math.floor(Number(data.sectionLimit)||1))), days=Math.min(730,Math.max(1,Math.floor(Number(data.availabilityDays)||30)));
-      if (!await one("SELECT id FROM users WHERE email=$1 AND role='student'",[studentEmail]) || !await one("SELECT id FROM courses WHERE id=$1",[courseId]) || !planTypes.includes(planType) || !planTypes.includes(sectionType)) return Response.json({error:"Choose a valid student, course, and subscription plan"},{status:400});
-      const code=accessCode(), starts=new Date(), ends=new Date(starts.getTime()+days*86400000);
-      await pool.query("INSERT INTO access_codes(code,student_email,course_id,plan_type,section_type,section_limit,available_from,available_until,status,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'active',$9)",[code,studentEmail,courseId,planType,sectionType,sectionLimit,starts,ends,user.email]);
-      await pool.query("INSERT INTO notifications(user_email,course_id,title,message) VALUES($1,$2,$3,$4)",[studentEmail,courseId,"Course access code created",`Your personal access code is ${code}. It expires in ${days} day(s).`]);
-      return Response.json({ok:true,code},{status:201});
-    }
-    if (action === "redeemAccessCode") {
-      if (user.role !== "student") return Response.json({error:"Student access required"},{status:403});
-      const code=clean(data.code,40).toUpperCase(); const grant=await one<{id:number;course_id:number}>("SELECT id,course_id FROM access_codes WHERE code=$1 AND student_email=$2 AND status='active' AND NOW() BETWEEN available_from AND available_until",[code,user.email]);
-      if(!grant) return Response.json({error:"This code is invalid, expired, or belongs to another student"},{status:400});
-      await withTransaction(async(client)=>{await client.query("UPDATE access_codes SET status='redeemed',redeemed_at=NOW() WHERE id=$1",[grant.id]);await client.query("INSERT INTO enrollments(user_email,course_id,payment_status,status) VALUES($1,$2,'paid','active') ON CONFLICT(user_email,course_id) DO UPDATE SET payment_status='paid',status='active'",[user.email,grant.course_id]);await client.query("INSERT INTO notifications(user_email,course_id,title,message) VALUES($1,$2,$3,$4)",[user.email,grant.course_id,"Course access activated","Your personal course access is now active."]);});
-      return Response.json({ok:true});
-    }
+if (action === "generateAccessCode") {
+  if (user.role !== "admin") return Response.json({ error: "Administrator access required" }, { status: 403 });
+  const courseId=Number(data.courseId), planType=clean(data.planType,40), sectionType=planType==="full_curriculum"?"full_curriculum":clean(data.sectionType,40)||planType;
+  const sectionLimit=Math.min(200,Math.max(1,Math.floor(Number(data.sectionLimit)||1))), days=Math.min(730,Math.max(1,Math.floor(Number(data.availabilityDays)||30)));
+  const count=Math.min(300,Math.max(1,Math.floor(Number(data.count)||1)));
+  if (!await one("SELECT id FROM courses WHERE id=$1",[courseId]) || !planTypes.includes(planType) || !planTypes.includes(sectionType)) return Response.json({error:"Choose a valid course and subscription plan"},{status:400});
+  const starts=new Date(), ends=new Date(starts.getTime()+days*86400000);
+  const codes:string[]=[];
+  for (let i=0;i<count;i++){
+    const code=accessCode();
+    await pool.query("INSERT INTO access_codes(code,student_email,course_id,plan_type,section_type,section_limit,available_from,available_until,status,created_by) VALUES($1,NULL,$2,$3,$4,$5,$6,$7,'active',$8)",[code,courseId,planType,sectionType,sectionLimit,starts,ends,user.email]);
+    codes.push(code);
+  }
+  return Response.json({ok:true,codes},{status:201});
+}
+
+if (action === "redeemAccessCode") {
+  if (user.role !== "student") return Response.json({error:"Student access required"},{status:403});
+  const code=clean(data.code,40).toUpperCase(); const grant=await one<{id:number;course_id:number}>("SELECT id,course_id FROM access_codes WHERE code=$1 AND student_email IS NULL AND status='active' AND NOW() BETWEEN available_from AND available_until",[code]);
+  if(!grant) return Response.json({error:"This code is invalid, expired, or already used"},{status:400});
+  await withTransaction(async(client)=>{await client.query("UPDATE access_codes SET status='redeemed',student_email=$2,redeemed_at=NOW() WHERE id=$1",[grant.id,user.email]);await client.query("INSERT INTO enrollments(user_email,course_id,payment_status,status) VALUES($1,$2,'paid','active') ON CONFLICT(user_email,course_id) DO UPDATE SET payment_status='paid',status='active'",[user.email,grant.course_id]);await client.query("INSERT INTO notifications(user_email,course_id,title,message) VALUES($1,$2,$3,$4)",[user.email,grant.course_id,"Course access activated","Your personal course access is now active."]);});
+  return Response.json({ok:true});
+}
+
     if (action === "revokeAccessCode") { if(user.role!=="admin") return Response.json({error:"Administrator access required"},{status:403}); await pool.query("UPDATE access_codes SET status='revoked' WHERE id=$1",[Number(data.id)]); return Response.json({ok:true}); }
 
     if (action === "enroll") {

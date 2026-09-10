@@ -14,8 +14,8 @@ function secret() {
 
 type SessionPayload = { sub: string; email: string; role: PlatformRole; deviceId: string };
 
-export async function createSession(user: { id: number; email: string; role: PlatformRole }, deviceId: string) {
-  const days = Math.max(1, Number(process.env.SESSION_DAYS || 7));
+export async function createSession(user: { id: number; email: string; role: PlatformRole }, deviceId: string, remember = true) {
+  const days = remember ? Math.max(1, Number(process.env.SESSION_DAYS || 7)) : 1;
   const token = await new SignJWT({ email: user.email, role: user.role, deviceId })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(String(user.id))
@@ -24,7 +24,10 @@ export async function createSession(user: { id: number; email: string; role: Pla
     .sign(secret());
   const jar = await cookies();
   const secure = process.env.NODE_ENV === "production";
-  jar.set(SESSION_COOKIE, token, { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: days * 86400 });
+  const sessionCookie = remember
+    ? { httpOnly: true as const, sameSite: "lax" as const, secure, path: "/", maxAge: days * 86400 }
+    : { httpOnly: true as const, sameSite: "lax" as const, secure, path: "/" };
+  jar.set(SESSION_COOKIE, token, sessionCookie);
   jar.set(DEVICE_COOKIE, deviceId, { httpOnly: true, sameSite: "lax", secure, path: "/", maxAge: 365 * 86400 });
 }
 

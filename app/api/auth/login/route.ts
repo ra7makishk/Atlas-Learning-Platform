@@ -9,6 +9,7 @@ export async function POST(request: Request) {
     const body = await request.json() as Record<string, unknown>;
     const email = clean(body.email, 160).toLowerCase();
     const password = clean(body.password, 200);
+    const remember = body.rememberMe === "on" || body.rememberMe === true || body.rememberMe === "true";
     const user = await one<{ id: number; email: string; password_hash: string; role: PlatformRole; status: string; trusted_device_id: string | null }>(
       "SELECT id,email,password_hash,role,status,trusted_device_id FROM users WHERE email=$1", [email],
     );
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Another device is already trusted. An administrator must approve this device before it can sign in.", code: "DEVICE_CHANGE_REQUIRED" }, { status: 423 });
     }
     if (user.role === "student" && !user.trusted_device_id) await pool.query("UPDATE users SET trusted_device_id=$1 WHERE id=$2", [deviceId, user.id]);
-    await createSession(user, deviceId);
+    await createSession(user, deviceId, remember);
     return Response.json({ ok: true, redirect: "/workspace" });
   } catch (error) { return apiError(error, "Login error"); }
 }

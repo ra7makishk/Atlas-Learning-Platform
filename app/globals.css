@@ -217,6 +217,8 @@ button, input, textarea, select { font: inherit; }
 .control-form input:focus, .control-form textarea:focus, .control-form select:focus { border-color: var(--blue); }
 .control-form textarea { min-height: 90px; resize: vertical; }
 .control-form .wide { grid-column: 1 / -1; }
+.control-form .remember-me-field { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 9px; }
+.control-form .remember-me-field input[type="checkbox"] { display: inline-block; width: auto; margin-top: 0; flex-shrink: 0; }
 .workspace-primary { border: 0; background: var(--blue); color: white; padding: 13px 15px; display: flex; justify-content: space-between; gap: 20px; cursor: pointer; font-size: 9px; font-weight: 900; }
 .workspace-primary:hover { background: var(--blue-dark); }
 .file-input { display: block; border: 1px dashed #aaa79f; padding: 12px; text-align: center; cursor: pointer; }

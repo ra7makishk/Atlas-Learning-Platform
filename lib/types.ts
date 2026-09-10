@@ -10,5 +10,6 @@ export type PlatformUser = {
   country: string;
   city: string;
   specialty: string;
+  level: string;
   trustedDeviceId: string | null;
 };

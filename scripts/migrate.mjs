@@ -10,6 +10,7 @@ await client.connect();
 try {
   await client.query(sql);
   await client.query("ALTER TABLE lessons ADD COLUMN IF NOT EXISTS section_type TEXT NOT NULL DEFAULT 'full_curriculum'");
+  await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS level TEXT NOT NULL DEFAULT ''");
   await client.query("ALTER TABLE access_codes ALTER COLUMN student_email DROP NOT NULL");
   const cleanupKey = "demo_catalog_removed_20260907";
   const existing = await client.query("SELECT value FROM app_settings WHERE key=$1", [cleanupKey]);

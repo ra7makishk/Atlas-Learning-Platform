@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
   country TEXT NOT NULL DEFAULT '',
   city TEXT NOT NULL DEFAULT '',
   specialty TEXT NOT NULL DEFAULT '',
+  level TEXT NOT NULL DEFAULT '',
   trusted_device_id TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()

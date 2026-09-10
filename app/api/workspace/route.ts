@@ -65,9 +65,9 @@ export async function POST(request: Request) {
     const user = access.user;
 
     if (action === "profile") {
-      const name = clean(data.name, 120), phone = clean(data.phone, 30);
-      if (!name || !phone) return Response.json({ error: "Name and phone are required" }, { status: 400 });
-      await pool.query(`UPDATE users SET name=$1,phone=$2,whatsapp=$3,country=$4,city=$5,specialty=$6,status=CASE WHEN status IN ('rejected','needs_changes') THEN 'pending' ELSE status END,updated_at=NOW() WHERE email=$7`, [name, phone, clean(data.whatsapp, 30), clean(data.country, 80), clean(data.city, 80), clean(data.specialty, 160), user.email]);
+      const name = clean(data.name, 120), phone = clean(data.phone, 30), level = clean(data.level, 30);
+      if (!name || !phone || !["first_year","second_year","third_year","fourth_year","graduate"].includes(level)) return Response.json({ error: "Name, phone, and a valid level are required" }, { status: 400 });
+      await pool.query(`UPDATE users SET name=$1,phone=$2,whatsapp=$3,country=$4,city=$5,specialty=$6,level=$7,status=CASE WHEN status IN ('rejected','needs_changes') THEN 'pending' ELSE status END,updated_at=NOW() WHERE email=$8`, [name, phone, clean(data.whatsapp, 30), clean(data.country, 80), clean(data.city, 80), clean(data.specialty, 160), level, user.email]);
       return Response.json({ ok: true });
     }
 

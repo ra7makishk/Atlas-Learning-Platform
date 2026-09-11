@@ -1,5 +1,5 @@
 import { one, pool, rows } from "../../../lib/db";
-import { requireManager } from "../../../lib/auth";
+import { currentUser, requireManager } from "../../../lib/auth";
 import { apiError, clean, slugify } from "../../../lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,18 @@ const publicSelect = `SELECT id,slug,title_en AS "titleEn",title_ar AS "titleAr"
  COALESCE((SELECT array_agg(cs.subject_id ORDER BY cs.subject_id) FROM course_subjects cs WHERE cs.course_id=courses.id),'{}') AS "subjectIds" FROM courses`;
 
 export async function GET() {
-  try { return Response.json({ courses: await rows(`${publicSelect} WHERE published=TRUE ORDER BY id`) }); }
+  try {
+    // The public catalog is unauthenticated by default (visitors and students need
+    // to browse every instructor's courses to choose one). The one exception: a
+    // signed-in instructor browsing the public site should only see their own
+    // course(s), never a competing instructor's — so a session is checked here even
+    // though none is required to call this endpoint.
+    const user = await currentUser();
+    const courses = user?.role === "instructor"
+      ? await rows(`${publicSelect} WHERE published=TRUE AND instructor_email=$1 ORDER BY id`, [user.email])
+      : await rows(`${publicSelect} WHERE published=TRUE ORDER BY id`);
+    return Response.json({ courses });
+  }
   catch (error) { return apiError(error, "Courses GET error"); }
 }
 

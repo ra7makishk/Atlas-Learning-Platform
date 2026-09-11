@@ -1,0 +1,195 @@
+diff --git a/app/api/auth/register/route.ts b/app/api/auth/register/route.ts
+index 5d9ea5b..1a7646e 100644
+--- a/app/api/auth/register/route.ts
++++ b/app/api/auth/register/route.ts
+@@ -1,7 +1,7 @@
+ import bcrypt from "bcryptjs";
+ import { one } from "../../../../lib/db";
+ import { createSession, getOrCreateDeviceId } from "../../../../lib/auth";
+-import { apiError, clean } from "../../../../lib/validation";
++import { apiError, clean, validateStageLevel } from "../../../../lib/validation";
+ 
+ export async function POST(request: Request) {
+   try {
+@@ -10,18 +10,19 @@ export async function POST(request: Request) {
+     const password = clean(body.password, 200);
+     const name = clean(body.name, 120);
+     const phone = clean(body.phone, 30);
+-    const level = clean(body.level, 30);
+-    if (!/^\S+@\S+\.\S+$/.test(email) || password.length < 8 || !name || !phone || !["first_year","second_year","third_year","fourth_year","graduate"].includes(level)) {
+-      return Response.json({ error: "Valid email, name, phone, level, and an 8-character password are required" }, { status: 400 });
++    const stage = clean(body.stage, 20);
++    const level = stage === "graduate" ? "" : clean(body.level, 30);
++    if (!/^\S+@\S+\.\S+$/.test(email) || password.length < 8 || !name || !phone || !validateStageLevel(stage, level)) {
++      return Response.json({ error: "Valid email, name, phone, educational stage/level, and an 8-character password are required" }, { status: 400 });
+     }
+     const exists = await one("SELECT id FROM users WHERE email=$1", [email]);
+     if (exists) return Response.json({ error: "An account already exists for this email" }, { status: 409 });
+     const passwordHash = await bcrypt.hash(password, 12);
+     const deviceId = await getOrCreateDeviceId();
+     const user = await one<{ id: number; email: string; role: "student" }>(
+-      `INSERT INTO users (email,password_hash,name,phone,whatsapp,country,city,specialty,level,role,status,trusted_device_id)
+-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'student','pending',$10) RETURNING id,email,role`,
+-      [email, passwordHash, name, phone, clean(body.whatsapp, 30), clean(body.country, 80), clean(body.city, 80), clean(body.specialty, 160), level, deviceId],
++      `INSERT INTO users (email,password_hash,name,phone,whatsapp,country,city,specialty,stage,level,role,status,trusted_device_id)
++       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'student','pending',$11) RETURNING id,email,role`,
++      [email, passwordHash, name, phone, clean(body.whatsapp, 30), clean(body.country, 80), clean(body.city, 80), clean(body.specialty, 160), stage, level, deviceId],
+     );
+     if (!user) throw new Error("Account could not be created");
+     await createSession(user, deviceId);
+diff --git a/app/api/workspace/route.ts b/app/api/workspace/route.ts
+index 708cf2f..26cfdcf 100644
+--- a/app/api/workspace/route.ts
++++ b/app/api/workspace/route.ts
+@@ -1,7 +1,7 @@
+ import { requireUser } from "../../../lib/auth";
+ import { one, pool, rows, withTransaction } from "../../../lib/db";
+ import { paymentDecision, type PaymentMethod } from "../../../lib/payments";
+-import { apiError, clean } from "../../../lib/validation";
++import { apiError, clean, validateStageLevel } from "../../../lib/validation";
+ 
+ export const dynamic = "force-dynamic";
+ 
+@@ -65,9 +65,10 @@ export async function POST(request: Request) {
+     const user = access.user;
+ 
+     if (action === "profile") {
+-      const name = clean(data.name, 120), phone = clean(data.phone, 30), level = clean(data.level, 30);
+-      if (!name || !phone || !["first_year","second_year","third_year","fourth_year","graduate"].includes(level)) return Response.json({ error: "Name, phone, and a valid level are required" }, { status: 400 });
+-      await pool.query(`UPDATE users SET name=$1,phone=$2,whatsapp=$3,country=$4,city=$5,specialty=$6,level=$7,status=CASE WHEN status IN ('rejected','needs_changes') THEN 'pending' ELSE status END,updated_at=NOW() WHERE email=$8`, [name, phone, clean(data.whatsapp, 30), clean(data.country, 80), clean(data.city, 80), clean(data.specialty, 160), level, user.email]);
++      const name = clean(data.name, 120), phone = clean(data.phone, 30), stage = clean(data.stage, 20);
++      const level = stage === "graduate" ? "" : clean(data.level, 30);
++      if (!name || !phone || !validateStageLevel(stage, level)) return Response.json({ error: "Name, phone, and a valid educational stage/level are required" }, { status: 400 });
++      await pool.query(`UPDATE users SET name=$1,phone=$2,whatsapp=$3,country=$4,city=$5,specialty=$6,stage=$7,level=$8,status=CASE WHEN status IN ('rejected','needs_changes') THEN 'pending' ELSE status END,updated_at=NOW() WHERE email=$9`, [name, phone, clean(data.whatsapp, 30), clean(data.country, 80), clean(data.city, 80), clean(data.specialty, 160), stage, level, user.email]);
+       return Response.json({ ok: true });
+     }
+ 
+diff --git a/app/auth-form.tsx b/app/auth-form.tsx
+index 77384de..ea973ed 100644
+--- a/app/auth-form.tsx
++++ b/app/auth-form.tsx
+@@ -6,12 +6,20 @@ import { useRouter } from "next/navigation";
+ 
+ type Mode = "login" | "register" | "forgot" | "reset";
+ 
++const stageLabels: Record<string, string> = { high_school: "ثانوي", university: "جامعة", graduate: "متخرج" };
++const levelsByStage: Record<string, Record<string, string>> = {
++  high_school: { first_secondary: "الصف الأول الثانوي", second_secondary: "الصف الثاني الثانوي", third_secondary: "الصف الثالث الثانوي" },
++  university: { year_1: "الفرقة الأولى", year_2: "الفرقة الثانية", year_3: "الفرقة الثالثة", year_4: "الفرقة الرابعة", year_5: "الفرقة الخامسة", year_6: "الفرقة السادسة" },
++  graduate: {},
++};
++
+ export default function AuthForm({ mode, token = "" }: { mode: Mode; token?: string }) {
+   const router = useRouter();
+   const [busy, setBusy] = useState(false);
+   const [error, setError] = useState("");
+   const [message, setMessage] = useState("");
+   const [resetUrl, setResetUrl] = useState("");
++  const [stage, setStage] = useState("");
+ 
+   async function submit(event: FormEvent<HTMLFormElement>) {
+     event.preventDefault(); setBusy(true); setError(""); setMessage("");
+@@ -32,7 +40,7 @@ export default function AuthForm({ mode, token = "" }: { mode: Mode; token?: str
+ 
+   const title = mode === "login" ? "Welcome back." : mode === "register" ? "Create your student profile." : mode === "forgot" ? "Reset your password." : "Choose a new password.";
+   return <main className="auth-screen"><section className="auth-card auth-form-card"><Link className="academy-brand" href="/" aria-label="4Z Academy home"><img src="/assets/4z-academy-logo.png" alt="4Z Academy" /></Link><p className="micro-label">4Z ACADEMY</p><h1>{title}</h1><form className="control-form" onSubmit={submit}>
+-    {mode === "register" && <><label>Full name<input name="name" required autoComplete="name" /></label><label>Phone number<input name="phone" required autoComplete="tel" /></label><div className="two-auth-fields"><label>WhatsApp<input name="whatsapp" autoComplete="tel" /></label><label>Country<input name="country" autoComplete="country-name" /></label></div><div className="two-auth-fields"><label>City<input name="city" /></label><label>Field of study / work<input name="specialty" /></label></div><label>University level<select name="level" required defaultValue=""><option value="" disabled>Choose your level</option><option value="first_year">First year</option><option value="second_year">Second year</option><option value="third_year">Third year</option><option value="fourth_year">Fourth year</option><option value="graduate">Graduate</option></select></label></>}
++    {mode === "register" && <><label>Full name<input name="name" required autoComplete="name" /></label><label>Phone number<input name="phone" required autoComplete="tel" /></label><div className="two-auth-fields"><label>WhatsApp<input name="whatsapp" autoComplete="tel" /></label><label>Country<input name="country" autoComplete="country-name" /></label></div><div className="two-auth-fields"><label>City<input name="city" /></label><label>Field of study / work<input name="specialty" /></label></div><label>المرحلة الدراسية<select name="stage" required value={stage} onChange={(event) => setStage(event.target.value)}><option value="" disabled>اختاري المرحلة</option>{Object.entries(stageLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>{stage && stage !== "graduate" && <label>السنة الدراسية<select name="level" required defaultValue=""><option value="" disabled>اختاري السنة</option>{Object.entries(levelsByStage[stage] || {}).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>}</>}
+     {mode !== "reset" && <label>Email address<input name="email" required type="email" autoComplete="email" /></label>}
+     {!["forgot"].includes(mode) && <label>{mode === "reset" ? "New password" : "Password"}<input name="password" required minLength={8} type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} /></label>}
+     {mode === "login" && <label className="remember-me-field"><input name="rememberMe" type="checkbox" defaultChecked /> Remember me</label>}
+diff --git a/app/workspace/workspace-client.tsx b/app/workspace/workspace-client.tsx
+index 80fc570..f015bba 100644
+--- a/app/workspace/workspace-client.tsx
++++ b/app/workspace/workspace-client.tsx
+@@ -337,11 +337,16 @@ function PendingProfile({ user, act }: { user: PlatformUser; act: (action: strin
+   return <div className="pending-layout"><section><p className="micro-label">APPLICATION STATUS</p><h2>{user.status === "needs_changes" ? "Your profile needs an update." : "Complete your student profile."}</h2><p>Course payment and enrollment become available after an administrator or instructor reviews your information.</p><ol><li className="done">Account created</li><li className={user.phone ? "done" : ""}>Full profile submitted</li><li>Academic review</li><li>Course enrollment</li></ol></section><ProfileForm user={user} act={act} /></div>;
+ }
+ 
+-const levelLabels: Record<string,string> = { first_year: "First year", second_year: "Second year", third_year: "Third year", fourth_year: "Fourth year", graduate: "Graduate" };
++const stageLabels: Record<string,string> = { high_school: "ثانوي", university: "جامعة", graduate: "متخرج" };
++const levelsByStage: Record<string, Record<string,string>> = {
++  high_school: { first_secondary: "الصف الأول الثانوي", second_secondary: "الصف الثاني الثانوي", third_secondary: "الصف الثالث الثانوي" },
++  university: { year_1: "الفرقة الأولى", year_2: "الفرقة الثانية", year_3: "الفرقة الثالثة", year_4: "الفرقة الرابعة", year_5: "الفرقة الخامسة", year_6: "الفرقة السادسة" },
++  graduate: {},
++};
+ 
+ function ProfileForm({ user, act }: { user: PlatformUser; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+-  const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "", whatsapp: user.whatsapp || "", country: user.country || "", city: user.city || "", specialty: user.specialty || "", level: user.level || "" });
+-  return <section className="workspace-panel profile-form"><div className="panel-heading"><div><p>STUDENT DETAILS</p><h2>Clear, reviewable information</h2></div></div><form className="control-form two-column" onSubmit={(event) => { event.preventDefault(); void act("profile", form); }}>{Object.entries({ name: "Full legal name", phone: "Phone number", whatsapp: "WhatsApp number", country: "Country", city: "City", specialty: "Field of study / work" }).map(([name, label]) => <label key={name}>{label}<input required={["name", "phone"].includes(name)} value={form[name as keyof typeof form]} onChange={(event) => setForm({ ...form, [name]: event.target.value })} /></label>)}<label>University level<select required value={form.level} onChange={(event) => setForm({ ...form, level: event.target.value })}><option value="" disabled>Choose your level</option>{Object.entries(levelLabels).map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select></label><button className="workspace-primary wide" type="submit">Submit for review <span>↗</span></button></form></section>;
++  const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "", whatsapp: user.whatsapp || "", country: user.country || "", city: user.city || "", specialty: user.specialty || "", stage: user.stage || "", level: user.level || "" });
++  return <section className="workspace-panel profile-form"><div className="panel-heading"><div><p>STUDENT DETAILS</p><h2>Clear, reviewable information</h2></div></div><form className="control-form two-column" onSubmit={(event) => { event.preventDefault(); void act("profile", form); }}>{Object.entries({ name: "Full legal name", phone: "Phone number", whatsapp: "WhatsApp number", country: "Country", city: "City", specialty: "Field of study / work" }).map(([name, label]) => <label key={name}>{label}<input required={["name", "phone"].includes(name)} value={form[name as keyof typeof form]} onChange={(event) => setForm({ ...form, [name]: event.target.value })} /></label>)}<label>المرحلة الدراسية<select required value={form.stage} onChange={(event) => setForm({ ...form, stage: event.target.value, level: "" })}><option value="" disabled>اختاري المرحلة</option>{Object.entries(stageLabels).map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select></label>{form.stage && form.stage !== "graduate" && <label>السنة الدراسية<select required value={form.level} onChange={(event) => setForm({ ...form, level: event.target.value })}><option value="" disabled>اختاري السنة</option>{Object.entries(levelsByStage[form.stage] || {}).map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select></label>}<button className="workspace-primary wide" type="submit">Submit for review <span>↗</span></button></form></section>;
+ }
+ 
+ function Discover({ courses, demoPayments, act }: { courses: AnyRow[]; demoPayments: boolean; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+diff --git a/db/schema.sql b/db/schema.sql
+index 2a8b486..195f67b 100644
+--- a/db/schema.sql
++++ b/db/schema.sql
+@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
+   country TEXT NOT NULL DEFAULT '',
+   city TEXT NOT NULL DEFAULT '',
+   specialty TEXT NOT NULL DEFAULT '',
++  stage TEXT NOT NULL DEFAULT '',
+   level TEXT NOT NULL DEFAULT '',
+   trusted_device_id TEXT,
+   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+diff --git a/lib/auth.ts b/lib/auth.ts
+index f39ae60..a0fd839 100644
+--- a/lib/auth.ts
++++ b/lib/auth.ts
+@@ -61,8 +61,8 @@ export async function currentUser(): Promise<PlatformUser | null> {
+   if (!session) return null;
+   const user = await one<{
+     id: number; email: string; name: string; role: PlatformRole; status: string; phone: string; whatsapp: string;
+-    country: string; city: string; specialty: string; level: string; trusted_device_id: string | null;
+-  }>("SELECT id,email,name,role,status,phone,whatsapp,country,city,specialty,level,trusted_device_id FROM users WHERE id=$1 AND email=$2", [Number(session.sub), session.email]);
++    country: string; city: string; specialty: string; stage: string; level: string; trusted_device_id: string | null;
++  }>("SELECT id,email,name,role,status,phone,whatsapp,country,city,specialty,stage,level,trusted_device_id FROM users WHERE id=$1 AND email=$2", [Number(session.sub), session.email]);
+   if (!user) return null;
+   if (user.role === "student" && user.trusted_device_id && user.trusted_device_id !== session.deviceId) return null;
+   return { ...user, trustedDeviceId: user.trusted_device_id };
+diff --git a/lib/types.ts b/lib/types.ts
+index fad2b48..90c6bfd 100644
+--- a/lib/types.ts
++++ b/lib/types.ts
+@@ -10,6 +10,7 @@ export type PlatformUser = {
+   country: string;
+   city: string;
+   specialty: string;
++  stage: string;
+   level: string;
+   trustedDeviceId: string | null;
+ };
+diff --git a/lib/validation.ts b/lib/validation.ts
+index fc4739f..6306993 100644
+--- a/lib/validation.ts
++++ b/lib/validation.ts
+@@ -10,3 +10,15 @@ export function apiError(error: unknown, context: string) {
+   console.error(context, error);
+   return Response.json({ error: "The request could not be completed. Please try again." }, { status: 500 });
+ }
++
++export const stageLevels: Record<string, string[]> = {
++  high_school: ["first_secondary", "second_secondary", "third_secondary"],
++  university: ["year_1", "year_2", "year_3", "year_4", "year_5", "year_6"],
++  graduate: [],
++};
++
++export function validateStageLevel(stage: string, level: string) {
++  if (!Object.keys(stageLevels).includes(stage)) return false;
++  if (stage === "graduate") return true;
++  return stageLevels[stage].includes(level);
++}
+diff --git a/scripts/migrate.mjs b/scripts/migrate.mjs
+index 4053cf7..daff877 100644
+--- a/scripts/migrate.mjs
++++ b/scripts/migrate.mjs
+@@ -12,6 +12,7 @@ try {
+   await client.query("ALTER TABLE lessons ADD COLUMN IF NOT EXISTS section_type TEXT NOT NULL DEFAULT 'full_curriculum'");
+   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS level TEXT NOT NULL DEFAULT ''");
+   await client.query("ALTER TABLE access_codes ALTER COLUMN student_email DROP NOT NULL");
++  await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT ''");
+   const cleanupKey = "demo_catalog_removed_20260907";
+   const existing = await client.query("SELECT value FROM app_settings WHERE key=$1", [cleanupKey]);
+   if (!existing.rowCount) {

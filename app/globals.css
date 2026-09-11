@@ -219,6 +219,14 @@ button, input, textarea, select { font: inherit; }
 .control-form .wide { grid-column: 1 / -1; }
 .control-form .remember-me-field { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 9px; }
 .control-form .remember-me-field input[type="checkbox"] { display: inline-block; width: auto; margin-top: 0; flex-shrink: 0; }
+.subject-picker { border: 1px solid #cbc7be; padding: 10px 12px; max-height: 360px; overflow-y: auto; }
+.subject-picker details { margin: 4px 0; }
+.subject-picker summary { cursor: pointer; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; padding: 4px 0; }
+.subject-picker details details { margin-inline-start: 14px; }
+.subject-term-group { margin: 6px 0 6px 14px; }
+.subject-term-group b { display: block; font-size: 8px; text-transform: uppercase; letter-spacing: .08em; color: #74767c; margin-bottom: 4px; }
+.subject-checkbox { display: flex; align-items: center; gap: 8px; font-size: 10px; text-transform: none; letter-spacing: 0; font-weight: 400; padding: 3px 0; }
+.subject-checkbox input { width: auto; margin: 0; }
 .workspace-primary { border: 0; background: var(--blue); color: white; padding: 13px 15px; display: flex; justify-content: space-between; gap: 20px; cursor: pointer; font-size: 9px; font-weight: 900; }
 .workspace-primary:hover { background: var(--blue-dark); }
 .file-input { display: block; border: 1px dashed #aaa79f; padding: 12px; text-align: center; cursor: pointer; }

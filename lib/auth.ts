@@ -61,11 +61,11 @@ export async function currentUser(): Promise<PlatformUser | null> {
   if (!session) return null;
   const user = await one<{
     id: number; email: string; name: string; role: PlatformRole; status: string; phone: string; whatsapp: string;
-    country: string; city: string; specialty: string; level: string; trusted_device_id: string | null;
-  }>("SELECT id,email,name,role,status,phone,whatsapp,country,city,specialty,level,trusted_device_id FROM users WHERE id=$1 AND email=$2", [Number(session.sub), session.email]);
+    country: string; city: string; specialty: string; level: string; college_id: number | null; university_id: number | null; year_id: number | null; trusted_device_id: string | null;
+  }>("SELECT id,email,name,role,status,phone,whatsapp,country,city,specialty,level,college_id,university_id,year_id,trusted_device_id FROM users WHERE id=$1 AND email=$2", [Number(session.sub), session.email]);
   if (!user) return null;
   if (user.role === "student" && user.trusted_device_id && user.trusted_device_id !== session.deviceId) return null;
-  return { ...user, trustedDeviceId: user.trusted_device_id };
+  return { ...user, collegeId: user.college_id, universityId: user.university_id, yearId: user.year_id, trustedDeviceId: user.trusted_device_id };
 }
 
 export async function requireUser() {

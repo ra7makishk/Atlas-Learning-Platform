@@ -148,6 +148,86 @@ CREATE TABLE IF NOT EXISTS app_settings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS colleges (
+  id BIGSERIAL PRIMARY KEY,
+  name_ar TEXT NOT NULL,
+  name_en TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS universities (
+  id BIGSERIAL PRIMARY KEY,
+  college_id BIGINT NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
+  name_ar TEXT NOT NULL,
+  name_en TEXT NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(college_id, name_ar)
+);
+
+CREATE TABLE IF NOT EXISTS academic_years (
+  id BIGSERIAL PRIMARY KEY,
+  university_id BIGINT NOT NULL REFERENCES universities(id) ON DELETE CASCADE,
+  year_number INTEGER NOT NULL CHECK (year_number BETWEEN 1 AND 8),
+  name_ar TEXT NOT NULL,
+  name_en TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(university_id, year_number)
+);
+
+CREATE TABLE IF NOT EXISTS terms (
+  id BIGSERIAL PRIMARY KEY,
+  year_id BIGINT NOT NULL REFERENCES academic_years(id) ON DELETE CASCADE,
+  term_number INTEGER NOT NULL CHECK (term_number BETWEEN 1 AND 4),
+  name_ar TEXT NOT NULL,
+  name_en TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(year_id, term_number)
+);
+
+-- A subject's real identity: one row per (term, subject name). This is the id every
+-- lock/enrollment decision is keyed on — never the free-text name.
+CREATE TABLE IF NOT EXISTS subjects (
+  id BIGSERIAL PRIMARY KEY,
+  term_id BIGINT NOT NULL REFERENCES terms(id) ON DELETE CASCADE,
+  name_ar TEXT NOT NULL,
+  name_en TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(term_id, name_ar)
+);
+
+-- Links a course (= one instructor's offering) to every subject it satisfies.
+-- One subject can be linked to several courses (several instructors teaching it).
+-- One course can be linked to several subjects (same instructor/content offered
+-- under more than one college/university/year/term "window").
+CREATE TABLE IF NOT EXISTS course_subjects (
+  course_id BIGINT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  subject_id BIGINT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (course_id, subject_id)
+);
+
+-- Records, per student per subject, which single course/instructor they are locked
+-- to. Written once at redemption time and never recomputed from the student's
+-- profile, so changing college/university/year/term later never disturbs an
+-- existing lock. One row per (student, subject) by design.
+CREATE TABLE IF NOT EXISTS subject_locks (
+  id BIGSERIAL PRIMARY KEY,
+  student_email TEXT NOT NULL REFERENCES users(email) ON UPDATE CASCADE ON DELETE CASCADE,
+  subject_id BIGINT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+  course_id BIGINT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  locked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(student_email, subject_id)
+);
+
+CREATE INDEX IF NOT EXISTS universities_college_idx ON universities(college_id);
+CREATE INDEX IF NOT EXISTS academic_years_university_idx ON academic_years(university_id);
+CREATE INDEX IF NOT EXISTS terms_year_idx ON terms(year_id);
+CREATE INDEX IF NOT EXISTS subjects_term_idx ON subjects(term_id);
+CREATE INDEX IF NOT EXISTS course_subjects_subject_idx ON course_subjects(subject_id);
+CREATE INDEX IF NOT EXISTS subject_locks_student_idx ON subject_locks(student_email);
+
 CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications(user_email, created_at DESC);
 CREATE INDEX IF NOT EXISTS messages_participants_idx ON messages(sender_email, receiver_email, created_at DESC);
 CREATE INDEX IF NOT EXISTS lessons_course_idx ON lessons(course_id, sort_order);

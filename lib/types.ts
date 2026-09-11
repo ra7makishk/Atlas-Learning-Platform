@@ -11,5 +11,8 @@ export type PlatformUser = {
   city: string;
   specialty: string;
   level: string;
+  collegeId: number | null;
+  universityId: number | null;
+  yearId: number | null;
   trustedDeviceId: string | null;
 };

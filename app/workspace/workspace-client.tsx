@@ -5,6 +5,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PlatformUser } from "../../lib/types";
 
 type AnyRow = Record<string, string | number | boolean | null>;
+type AcademicData = {
+  colleges: { id: number; nameEn: string; nameAr: string; sortOrder: number }[];
+  universities: { id: number; collegeId: number; nameEn: string; nameAr: string; sortOrder: number }[];
+  years: { id: number; universityId: number; yearNumber: number; nameEn: string; nameAr: string }[];
+  terms: { id: number; yearId: number; termNumber: number; nameEn: string; nameAr: string }[];
+  subjects: { id: number; termId: number; nameEn: string; nameAr: string }[];
+};
 type WorkspaceData = {
   user: PlatformUser;
   courses: AnyRow[];
@@ -17,14 +24,17 @@ type WorkspaceData = {
   payments: AnyRow[];
   deviceRequests: AnyRow[];
   accessCodes: AnyRow[];
+  subjectLocks: AnyRow[];
+  academic: AcademicData;
   demoPayments: boolean;
 };
 
-const emptyData: WorkspaceData = { user: {} as PlatformUser, courses: [], lessons: [], enrollments: [], notifications: [], messages: [], mediaAssets: [], users: [], payments: [], deviceRequests: [], accessCodes: [], demoPayments: false };
+const emptyAcademic: AcademicData = { colleges: [], universities: [], years: [], terms: [], subjects: [] };
+const emptyData: WorkspaceData = { user: {} as PlatformUser, courses: [], lessons: [], enrollments: [], notifications: [], messages: [], mediaAssets: [], users: [], payments: [], deviceRequests: [], accessCodes: [], subjectLocks: [], academic: emptyAcademic, demoPayments: false };
 
 const labels = {
-  en: { overview: "Overview", courses: "Courses", studio: "Video & live", instructors: "Instructors", access: "Access codes", students: "Students", payments: "Payments", devices: "Devices", messages: "Messages", learning: "My learning", activate: "Activate code", discover: "Discover", notifications: "Notifications", profile: "Profile", protection: "Player demo" },
-  ar: { overview: "نظرة عامة", courses: "الكورسات", studio: "الفيديو والبث", instructors: "المدرسين", access: "أكواد الاشتراك", students: "الطلاب", payments: "المدفوعات", devices: "الأجهزة", messages: "الرسائل", learning: "تعليمي", activate: "تفعيل كود", discover: "استكشف", notifications: "الإشعارات", profile: "البيانات", protection: "مشغل الحماية" },
+  en: { overview: "Overview", courses: "Courses", studio: "Video & live", instructors: "Instructors", access: "Access codes", students: "Students", payments: "Payments", devices: "Devices", messages: "Messages", learning: "My learning", activate: "Activate code", discover: "Discover", notifications: "Notifications", profile: "Profile", protection: "Player demo", academic: "Academic structure" },
+  ar: { overview: "نظرة عامة", courses: "الكورسات", studio: "الفيديو والبث", instructors: "المدرسين", access: "أكواد الاشتراك", students: "الطلاب", payments: "المدفوعات", devices: "الأجهزة", messages: "الرسائل", learning: "تعليمي", activate: "تفعيل كود", discover: "استكشف", notifications: "الإشعارات", profile: "البيانات", protection: "مشغل الحماية", academic: "Academic structure" },
 };
 const planLabels: Record<string,string> = { full_curriculum:"Full curriculum · منهج كامل", mid_review:"Midterm review · مراجعة الميد", before_mid:"Before midterm · قبل الميد", after_mid:"After midterm · بعد الميد", final_review:"Final review · مراجعة فاينل" };
 
@@ -155,8 +165,32 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Course action failed"); setBusy(false); return false; }
   };
 
+  const saveSubjects = async (courseId: number, subjectIds: number[]) => {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/courses", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "setSubjects", data: { id: courseId, subjectIds } }) });
+      const payload = await readJson(response);
+      if (!response.ok) throw new Error(String(payload.error || "Subjects could not be saved"));
+      setNotice("This course's subjects were updated.");
+      await load();
+      return true;
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Subjects could not be saved"); setBusy(false); return false; }
+  };
+
+  const academicAction = async (action: string, actionData: Record<string, unknown>) => {
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch("/api/academic", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, data: actionData }) });
+      const payload = await readJson(response);
+      if (!response.ok) throw new Error(String(payload.error || "Action failed"));
+      setNotice("Saved successfully.");
+      await load();
+      return true;
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Action failed"); setBusy(false); return false; }
+  };
+
   const managerNav = role === "admin"
-    ? [["overview", t.overview], ["courses", t.courses], ["studio", t.studio], ["instructors", t.instructors], ["access", t.access], ["students", t.students], ["payments", t.payments], ["devices", t.devices], ["notifications", t.notifications], ["messages", t.messages], ["protection", t.protection]]
+    ? [["overview", t.overview], ["courses", t.courses], ["studio", t.studio], ["academic", t.academic], ["instructors", t.instructors], ["access", t.access], ["students", t.students], ["payments", t.payments], ["devices", t.devices], ["notifications", t.notifications], ["messages", t.messages], ["protection", t.protection]]
     : [["overview", t.overview], ["courses", t.courses], ["studio", t.studio], ["students", t.students], ["notifications", t.notifications], ["messages", t.messages], ["protection", t.protection]];
   const studentNav = [["learning", t.learning], ["activate", t.activate], ["discover", t.discover], ["notifications", t.notifications], ["messages", t.messages], ["profile", t.profile]];
   const nav = role === "student" ? studentNav : managerNav;
@@ -179,13 +213,14 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
         {notice && <div className="workspace-alert success"><span>{notice}</span><button onClick={() => setNotice("")}>×</button></div>}
         {busy && <div className="workspace-loader"><i /><span>Syncing your learning space…</span></div>}
 
-        {!busy && role === "student" && data.user.status !== "approved" ? <PendingProfile user={data.user} act={act} /> : null}
+        {!busy && role === "student" && data.user.status !== "approved" ? <PendingProfile user={data.user} academic={data.academic} act={act} /> : null}
         {!busy && (role !== "student" || data.user.status === "approved") && active === "overview" && <ManagerOverview data={data} role={role} />}
-        {!busy && active === "courses" && role !== "student" && <CourseManager courses={data.courses} saveCourse={saveCourse} manageCourse={manageCourse} role={role} />}
+        {!busy && active === "courses" && role !== "student" && <CourseManager courses={data.courses} saveCourse={saveCourse} manageCourse={manageCourse} saveSubjects={saveSubjects} academic={data.academic} role={role} />}
         {!busy && active === "studio" && role !== "student" && <ContentStudio courses={data.courses} lessons={data.lessons} act={act} />}
+        {!busy && active === "academic" && role === "admin" && <AcademicManager academic={data.academic} act={academicAction} />}
         {!busy && active === "instructors" && role === "admin" && <InstructorManager data={data} />}
         {!busy && active === "access" && role === "admin" && <AccessCodeManager data={data} act={act} />}
-        {!busy && active === "students" && role !== "student" && <StudentManager users={data.users} enrollments={data.enrollments} role={role} act={act} />}
+        {!busy && active === "students" && role !== "student" && <StudentManager users={data.users} enrollments={data.enrollments} academic={data.academic} role={role} act={act} />}
         {!busy && active === "payments" && role === "admin" && <PaymentManager payments={data.payments} act={act} />}
         {!busy && active === "devices" && role === "admin" && <DeviceManager rows={data.deviceRequests} act={act} />}
         {!busy && active === "protection" && role !== "student" && <ProtectedPlayer name={data.user.name} email={data.user.email} />}
@@ -194,7 +229,7 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
         {!busy && active === "discover" && role === "student" && data.user.status === "approved" && <Discover courses={data.courses} demoPayments={data.demoPayments} act={act} />}
         {!busy && active === "notifications" && (role !== "student" || data.user.status === "approved") && <Notifications rows={data.notifications} act={act} />}
         {!busy && active === "messages" && (role !== "student" || data.user.status === "approved") && <Messages data={data} act={act} />}
-        {!busy && active === "profile" && role === "student" && data.user.status === "approved" && <ProfileForm user={data.user} act={act} />}
+        {!busy && active === "profile" && role === "student" && data.user.status === "approved" && <ProfileForm user={data.user} academic={data.academic} act={act} />}
       </section>
     </main>
   );
@@ -223,7 +258,7 @@ function ActivateCode({ accessCodes, act }: { accessCodes:AnyRow[]; act:(action:
 
 const blankCourse = { titleEn: "", titleAr: "", categoryEn: "", categoryAr: "", summaryEn: "", summaryAr: "", instructorName: "", instructorEmail: "", whatsapp: "", price: 0, mode: "Recorded", imageUrl: "/assets/course-tech.png", level: "All levels", duration: "" };
 
-function CourseManager({ courses, saveCourse, manageCourse, role }: { courses: AnyRow[]; saveCourse: (course: Record<string, unknown>) => Promise<boolean>; manageCourse: (action: "publish" | "delete", course: Record<string, unknown>) => Promise<boolean>; role: string }) {
+function CourseManager({ courses, saveCourse, manageCourse, saveSubjects, academic, role }: { courses: AnyRow[]; saveCourse: (course: Record<string, unknown>) => Promise<boolean>; manageCourse: (action: "publish" | "delete", course: Record<string, unknown>) => Promise<boolean>; saveSubjects: (courseId: number, subjectIds: number[]) => Promise<boolean>; academic: AcademicData; role: string }) {
   const [editing, setEditing] = useState<Record<string, unknown>>(blankCourse);
   return <div className="manager-grid">
     <section className="workspace-panel course-list-panel">
@@ -240,6 +275,21 @@ function CourseManager({ courses, saveCourse, manageCourse, role }: { courses: A
       </article>)}</div> : <EmptyState>No courses yet. Use the editor to create your first draft.</EmptyState>}
     </section>
     <section className="workspace-panel form-panel"><div className="panel-heading"><div><p>EDITOR</p><h2>{editing.id ? "Update course" : "Create course draft"}</h2></div></div><CourseForm data={editing} setData={setEditing} onSave={saveCourse} role={role} /></section>
+    {editing.id ? <section className="workspace-panel form-panel"><div className="panel-heading"><div><p>SUBJECT LINKING</p><h2>Which subjects does this course satisfy?</h2></div></div><SubjectPicker key={String(editing.id)} courseId={Number(editing.id)} initialSubjectIds={(Array.isArray(editing.subjectIds) ? editing.subjectIds : []).map(Number)} academic={academic} onSave={saveSubjects} /></section> : null}
+  </div>;
+}
+
+// A course is only locked to the subjects it is explicitly linked to here — this is
+// what redeemAccessCode/enroll check against on the server (see course_subjects and
+// subject_locks in db/schema.sql). Grouped by college > university > year > term so
+// picking the right subject among many is still findable.
+function SubjectPicker({ courseId, initialSubjectIds, academic, onSave }: { courseId: number; initialSubjectIds: number[]; academic: AcademicData; onSave: (courseId: number, subjectIds: number[]) => Promise<boolean> }) {
+  const [selected, setSelected] = useState<number[]>(initialSubjectIds);
+  const toggle = (id: number) => setSelected((current) => current.includes(id) ? current.filter((row) => row !== id) : [...current, id]);
+  if (!academic.colleges.length) return <EmptyState>Add colleges, universities, years, terms, and subjects from the Academic structure tab first.</EmptyState>;
+  return <div className="control-form">
+    <div className="subject-picker">{academic.colleges.map((college) => <details key={college.id}><summary>{college.nameEn}</summary>{academic.universities.filter((university) => university.collegeId === college.id).map((university) => <details key={university.id}><summary>{university.nameEn}</summary>{academic.years.filter((year) => year.universityId === university.id).map((year) => <details key={year.id}><summary>{year.nameEn}</summary>{academic.terms.filter((term) => term.yearId === year.id).map((term) => <div key={term.id} className="subject-term-group"><b>{term.nameEn}</b>{academic.subjects.filter((subject) => subject.termId === term.id).map((subject) => <label key={subject.id} className="subject-checkbox"><input type="checkbox" checked={selected.includes(subject.id)} onChange={() => toggle(subject.id)} />{subject.nameEn}</label>)}</div>)}</details>)}</details>)}</details>)}</div>
+    <button className="workspace-primary" onClick={() => void onSave(courseId, selected)}>Save subjects <span>↗</span></button>
   </div>;
 }
 
@@ -320,9 +370,14 @@ function CourseForm({ data, setData, onSave, role }: { data: Record<string, unkn
   </form>;
 }
 
-function StudentManager({ users, enrollments, role, act }: { users: AnyRow[]; enrollments: AnyRow[]; role: string; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+function StudentManager({ users, enrollments, academic, role, act }: { users: AnyRow[]; enrollments: AnyRow[]; academic: AcademicData; role: string; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
   const students = users.filter((user) => user.role === "student");
-  return <section className="workspace-panel"><div className="panel-heading"><div><p>APPLICATION REVIEW</p><h2>Student profiles</h2></div><span className="status-chip">{students.filter((user) => user.status === "pending").length} pending</span></div>{students.length ? <div className="data-table student-table">{students.map((student) => <article key={String(student.email)}><div className="student-avatar">{String(student.name || student.email).slice(0, 2).toUpperCase()}</div><div><b>{String(student.name)}</b><small>{String(student.email)}</small></div><div><b>{String(student.phone || "No phone")}</b><small>{String(student.city || "City not added")} · {String(student.country || "Country not added")}</small></div><div><b>{String(student.specialty || "No specialty")}</b><small>{enrollments.filter((row) => row.user_email === student.email).length} enrollments</small></div><span className={`review-status ${String(student.status)}`}>{String(student.status)}</span><div className="row-actions"><button onClick={() => void act("reviewUser", { email: student.email, status: "approved" })}>Approve</button><button onClick={() => void act("reviewUser", { email: student.email, status: "needs_changes" })}>Changes</button>{role === "admin" && <button onClick={() => void act("setRole", { email: student.email, role: "instructor" })}>Make instructor</button>}</div></article>)}</div> : <EmptyState>New student applications will appear here.</EmptyState>}</section>;
+  const placement = (student: AnyRow) => {
+    const university = academic.universities.find((row) => row.id === Number(student.universityId));
+    const year = academic.years.find((row) => row.id === Number(student.yearId));
+    return university && year ? `${university.nameEn} · ${year.nameEn}` : "Academic placement not set";
+  };
+  return <section className="workspace-panel"><div className="panel-heading"><div><p>APPLICATION REVIEW</p><h2>Student profiles</h2></div><span className="status-chip">{students.filter((user) => user.status === "pending").length} pending</span></div>{students.length ? <div className="data-table student-table">{students.map((student) => <article key={String(student.email)}><div className="student-avatar">{String(student.name || student.email).slice(0, 2).toUpperCase()}</div><div><b>{String(student.name)}</b><small>{String(student.email)}</small></div><div><b>{String(student.phone || "No phone")}</b><small>{String(student.city || "City not added")} · {String(student.country || "Country not added")}</small></div><div><b>{placement(student)}</b><small>{enrollments.filter((row) => row.user_email === student.email).length} enrollments</small></div><span className={`review-status ${String(student.status)}`}>{String(student.status)}</span><div className="row-actions"><button onClick={() => void act("reviewUser", { email: student.email, status: "approved" })}>Approve</button><button onClick={() => void act("reviewUser", { email: student.email, status: "needs_changes" })}>Changes</button>{role === "admin" && <button onClick={() => void act("setRole", { email: student.email, role: "instructor" })}>Make instructor</button>}</div></article>)}</div> : <EmptyState>New student applications will appear here.</EmptyState>}</section>;
 }
 
 function PaymentManager({ payments, act }: { payments: AnyRow[]; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
@@ -333,15 +388,84 @@ function DeviceManager({ rows, act }: { rows: AnyRow[]; act: (action: string, da
   return <section className="workspace-panel"><div className="panel-heading"><div><p>TRUSTED DEVICE</p><h2>Device change requests</h2></div><span className="status-chip">One device per student</span></div>{rows.length ? <div className="data-table device-table">{rows.map((row) => <article key={String(row.id)}><div><b>{String(row.user_email)}</b><small>Requested {String(row.created_at)}</small></div><code>{String(row.requested_device_id).slice(0, 18)}…</code><button className="outline-button" onClick={() => void act("approveDevice", { id: row.id })}>Trust this device</button></article>)}</div> : <EmptyState>No device change requests are waiting.</EmptyState>}</section>;
 }
 
-function PendingProfile({ user, act }: { user: PlatformUser; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
-  return <div className="pending-layout"><section><p className="micro-label">APPLICATION STATUS</p><h2>{user.status === "needs_changes" ? "Your profile needs an update." : "Complete your student profile."}</h2><p>Course payment and enrollment become available after an administrator or instructor reviews your information.</p><ol><li className="done">Account created</li><li className={user.phone ? "done" : ""}>Full profile submitted</li><li>Academic review</li><li>Course enrollment</li></ol></section><ProfileForm user={user} act={act} /></div>;
+// Manages the college > university > year > term > subject tree that course
+// enrollment locking (subject_locks) and student placement are both built on.
+// Deleting any row cascades to everything nested under it in the database.
+function AcademicManager({ academic, act }: { academic: AcademicData; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+  const [collegeForm, setCollegeForm] = useState({ nameEn: "", nameAr: "" });
+  const [universityForm, setUniversityForm] = useState({ collegeId: "", nameEn: "", nameAr: "" });
+  const [yearForm, setYearForm] = useState({ universityId: "", yearNumber: "1", nameEn: "", nameAr: "" });
+  const [termForm, setTermForm] = useState({ yearId: "", termNumber: "1", nameEn: "", nameAr: "" });
+  const [subjectForm, setSubjectForm] = useState({ termId: "", nameEn: "", nameAr: "" });
+  const collegeName = (id: number) => academic.colleges.find((row) => row.id === id)?.nameEn || "—";
+  const universityName = (id: number) => academic.universities.find((row) => row.id === id)?.nameEn || "—";
+  const yearName = (id: number) => academic.years.find((row) => row.id === id)?.nameEn || "—";
+  const termName = (id: number) => academic.terms.find((row) => row.id === id)?.nameEn || "—";
+  return <div className="manager-grid">
+    <section className="workspace-panel form-panel">
+      <div className="panel-heading"><div><p>ADD</p><h2>Build the academic tree</h2></div></div>
+      <div className="control-form">
+        <label>College — English name<input value={collegeForm.nameEn} onChange={(e) => setCollegeForm({ ...collegeForm, nameEn: e.target.value })} /></label>
+        <label>College — Arabic name<input value={collegeForm.nameAr} onChange={(e) => setCollegeForm({ ...collegeForm, nameAr: e.target.value })} /></label>
+        <button className="workspace-primary" disabled={!collegeForm.nameEn || !collegeForm.nameAr} onClick={() => void act("addCollege", collegeForm).then((ok) => ok && setCollegeForm({ nameEn: "", nameAr: "" }))}>Add college <span>↗</span></button>
+      </div>
+      <div className="control-form">
+        <label>University — College<select value={universityForm.collegeId} onChange={(e) => setUniversityForm({ ...universityForm, collegeId: e.target.value })}><option value="">Choose college</option>{academic.colleges.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+        <label>University — English name<input value={universityForm.nameEn} onChange={(e) => setUniversityForm({ ...universityForm, nameEn: e.target.value })} /></label>
+        <label>University — Arabic name<input value={universityForm.nameAr} onChange={(e) => setUniversityForm({ ...universityForm, nameAr: e.target.value })} /></label>
+        <button className="workspace-primary" disabled={!universityForm.collegeId || !universityForm.nameEn || !universityForm.nameAr} onClick={() => void act("addUniversity", { ...universityForm, collegeId: Number(universityForm.collegeId) }).then((ok) => ok && setUniversityForm({ collegeId: "", nameEn: "", nameAr: "" }))}>Add university <span>↗</span></button>
+      </div>
+      <div className="control-form">
+        <label>Year — University<select value={yearForm.universityId} onChange={(e) => setYearForm({ ...yearForm, universityId: e.target.value })}><option value="">Choose university</option>{academic.universities.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+        <label>Year number (1-8)<input type="number" min="1" max="8" value={yearForm.yearNumber} onChange={(e) => setYearForm({ ...yearForm, yearNumber: e.target.value })} /></label>
+        <label>Year — English name<input value={yearForm.nameEn} onChange={(e) => setYearForm({ ...yearForm, nameEn: e.target.value })} placeholder="e.g. First year" /></label>
+        <label>Year — Arabic name<input value={yearForm.nameAr} onChange={(e) => setYearForm({ ...yearForm, nameAr: e.target.value })} /></label>
+        <button className="workspace-primary" disabled={!yearForm.universityId || !yearForm.nameEn || !yearForm.nameAr} onClick={() => void act("addYear", { ...yearForm, universityId: Number(yearForm.universityId), yearNumber: Number(yearForm.yearNumber) }).then((ok) => ok && setYearForm({ universityId: "", yearNumber: "1", nameEn: "", nameAr: "" }))}>Add year <span>↗</span></button>
+      </div>
+      <div className="control-form">
+        <label>Term — Year<select value={termForm.yearId} onChange={(e) => setTermForm({ ...termForm, yearId: e.target.value })}><option value="">Choose year</option>{academic.years.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+        <label>Term number (1-4)<input type="number" min="1" max="4" value={termForm.termNumber} onChange={(e) => setTermForm({ ...termForm, termNumber: e.target.value })} /></label>
+        <label>Term — English name<input value={termForm.nameEn} onChange={(e) => setTermForm({ ...termForm, nameEn: e.target.value })} placeholder="e.g. First term" /></label>
+        <label>Term — Arabic name<input value={termForm.nameAr} onChange={(e) => setTermForm({ ...termForm, nameAr: e.target.value })} /></label>
+        <button className="workspace-primary" disabled={!termForm.yearId || !termForm.nameEn || !termForm.nameAr} onClick={() => void act("addTerm", { ...termForm, yearId: Number(termForm.yearId), termNumber: Number(termForm.termNumber) }).then((ok) => ok && setTermForm({ yearId: "", termNumber: "1", nameEn: "", nameAr: "" }))}>Add term <span>↗</span></button>
+      </div>
+      <div className="control-form">
+        <label>Subject — Term<select value={subjectForm.termId} onChange={(e) => setSubjectForm({ ...subjectForm, termId: e.target.value })}><option value="">Choose term</option>{academic.terms.map((row) => <option key={row.id} value={String(row.id)}>{yearName(row.yearId)} — {row.nameEn}</option>)}</select></label>
+        <label>Subject — English name<input value={subjectForm.nameEn} onChange={(e) => setSubjectForm({ ...subjectForm, nameEn: e.target.value })} /></label>
+        <label>Subject — Arabic name<input value={subjectForm.nameAr} onChange={(e) => setSubjectForm({ ...subjectForm, nameAr: e.target.value })} /></label>
+        <button className="workspace-primary" disabled={!subjectForm.termId || !subjectForm.nameEn || !subjectForm.nameAr} onClick={() => void act("addSubject", { ...subjectForm, termId: Number(subjectForm.termId) }).then((ok) => ok && setSubjectForm({ termId: "", nameEn: "", nameAr: "" }))}>Add subject <span>↗</span></button>
+      </div>
+    </section>
+    <section className="workspace-panel course-list-panel">
+      <div className="panel-heading"><div><p>CURRENT TREE</p><h2>{academic.subjects.length} subjects</h2></div></div>
+      <div className="data-table">{academic.colleges.map((college) => <article key={college.id}><div><b>{college.nameEn}</b><small>College</small></div><button className="danger-action" onClick={() => window.confirm(`Delete "${college.nameEn}" and everything under it (universities, years, terms, subjects, and any course links)?`) && void act("deleteCollege", { id: college.id })}>Delete</button></article>)}
+        {academic.universities.map((university) => <article key={university.id}><div><b>{university.nameEn}</b><small>University of {collegeName(university.collegeId)}</small></div><button className="danger-action" onClick={() => window.confirm(`Delete "${university.nameEn}" and everything under it?`) && void act("deleteUniversity", { id: university.id })}>Delete</button></article>)}
+        {academic.years.map((year) => <article key={year.id}><div><b>{year.nameEn}</b><small>Year of {universityName(year.universityId)}</small></div><button className="danger-action" onClick={() => window.confirm(`Delete "${year.nameEn}" and everything under it?`) && void act("deleteYear", { id: year.id })}>Delete</button></article>)}
+        {academic.terms.map((term) => <article key={term.id}><div><b>{term.nameEn}</b><small>Term of {yearName(term.yearId)}</small></div><button className="danger-action" onClick={() => window.confirm(`Delete "${term.nameEn}" and every subject under it?`) && void act("deleteTerm", { id: term.id })}>Delete</button></article>)}
+        {academic.subjects.map((subject) => <article key={subject.id}><div><b>{subject.nameEn}</b><small>Subject of {termName(subject.termId)}</small></div><button className="danger-action" onClick={() => window.confirm(`Delete "${subject.nameEn}"? Any course linked to it and any student lock on it will be removed too.`) && void act("deleteSubject", { id: subject.id })}>Delete</button></article>)}
+        {!academic.colleges.length ? <EmptyState>Add your first college to start building the tree.</EmptyState> : null}
+      </div>
+    </section>
+  </div>;
 }
 
-const levelLabels: Record<string,string> = { first_year: "First year", second_year: "Second year", third_year: "Third year", fourth_year: "Fourth year", graduate: "Graduate" };
+function PendingProfile({ user, academic, act }: { user: PlatformUser; academic: AcademicData; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+  return <div className="pending-layout"><section><p className="micro-label">APPLICATION STATUS</p><h2>{user.status === "needs_changes" ? "Your profile needs an update." : "Complete your student profile."}</h2><p>Course payment and enrollment become available after an administrator or instructor reviews your information.</p><ol><li className="done">Account created</li><li className={user.phone ? "done" : ""}>Full profile submitted</li><li>Academic review</li><li>Course enrollment</li></ol></section><ProfileForm user={user} academic={academic} act={act} /></div>;
+}
 
-function ProfileForm({ user, act }: { user: PlatformUser; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
-  const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "", whatsapp: user.whatsapp || "", country: user.country || "", city: user.city || "", specialty: user.specialty || "", level: user.level || "" });
-  return <section className="workspace-panel profile-form"><div className="panel-heading"><div><p>STUDENT DETAILS</p><h2>Clear, reviewable information</h2></div></div><form className="control-form two-column" onSubmit={(event) => { event.preventDefault(); void act("profile", form); }}>{Object.entries({ name: "Full legal name", phone: "Phone number", whatsapp: "WhatsApp number", country: "Country", city: "City", specialty: "Field of study / work" }).map(([name, label]) => <label key={name}>{label}<input required={["name", "phone"].includes(name)} value={form[name as keyof typeof form]} onChange={(event) => setForm({ ...form, [name]: event.target.value })} /></label>)}<label>University level<select required value={form.level} onChange={(event) => setForm({ ...form, level: event.target.value })}><option value="" disabled>Choose your level</option>{Object.entries(levelLabels).map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select></label><button className="workspace-primary wide" type="submit">Submit for review <span>↗</span></button></form></section>;
+function ProfileForm({ user, academic, act }: { user: PlatformUser; academic: AcademicData; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+  const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "", whatsapp: user.whatsapp || "", country: user.country || "", city: user.city || "", specialty: user.specialty || "" });
+  const [collegeId, setCollegeId] = useState(user.collegeId ? String(user.collegeId) : "");
+  const [universityId, setUniversityId] = useState(user.universityId ? String(user.universityId) : "");
+  const [yearId, setYearId] = useState(user.yearId ? String(user.yearId) : "");
+  const universities = academic.universities.filter((row) => String(row.collegeId) === collegeId);
+  const years = academic.years.filter((row) => String(row.universityId) === universityId);
+  const submit = (event: React.FormEvent) => { event.preventDefault(); void act("profile", { ...form, collegeId: Number(collegeId), universityId: Number(universityId), yearId: Number(yearId) }); };
+  return <section className="workspace-panel profile-form"><div className="panel-heading"><div><p>STUDENT DETAILS</p><h2>Clear, reviewable information</h2></div></div><form className="control-form two-column" onSubmit={submit}>{Object.entries({ name: "Full legal name", phone: "Phone number", whatsapp: "WhatsApp number", country: "Country", city: "City", specialty: "Field of study / work" }).map(([name, label]) => <label key={name}>{label}<input required={["name", "phone"].includes(name)} value={form[name as keyof typeof form]} onChange={(event) => setForm({ ...form, [name]: event.target.value })} /></label>)}
+    <label>College<select required value={collegeId} onChange={(event) => { setCollegeId(event.target.value); setUniversityId(""); setYearId(""); }}><option value="" disabled>Choose your college</option>{academic.colleges.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+    <label>University<select required disabled={!collegeId} value={universityId} onChange={(event) => { setUniversityId(event.target.value); setYearId(""); }}><option value="" disabled>Choose your university</option>{universities.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+    <label>Year<select required disabled={!universityId} value={yearId} onChange={(event) => setYearId(event.target.value)}><option value="" disabled>Choose your year</option>{years.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+    <button className="workspace-primary wide" type="submit">Submit for review <span>↗</span></button></form></section>;
 }
 
 function Discover({ courses, demoPayments, act }: { courses: AnyRow[]; demoPayments: boolean; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {

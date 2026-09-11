@@ -6,7 +6,8 @@ export const dynamic = "force-dynamic";
 
 const publicSelect = `SELECT id,slug,title_en AS "titleEn",title_ar AS "titleAr",category_en AS "categoryEn",category_ar AS "categoryAr",
  summary_en AS "summaryEn",summary_ar AS "summaryAr",instructor_name AS "instructorName",instructor_email AS "instructorEmail",
- whatsapp,price::float8 AS price,mode,image_url AS "imageUrl",level,duration,published FROM courses`;
+ whatsapp,price::float8 AS price,mode,image_url AS "imageUrl",level,duration,published,
+ COALESCE((SELECT array_agg(cs.subject_id ORDER BY cs.subject_id) FROM course_subjects cs WHERE cs.course_id=courses.id),'{}') AS "subjectIds" FROM courses`;
 
 export async function GET() {
   try { return Response.json({ courses: await rows(`${publicSelect} WHERE published=TRUE ORDER BY id`) }); }
@@ -42,6 +43,18 @@ export async function POST(request: Request) {
     if (!existing || (access.user.role === "instructor" && existing.instructor_email !== access.user.email)) return Response.json({ error: "You cannot manage this course" }, { status: 403 });
     if (action === "delete") await pool.query("DELETE FROM courses WHERE id=$1", [id]);
     else if (action === "publish") await pool.query("UPDATE courses SET published=$1,updated_at=NOW() WHERE id=$2", [Boolean(data.published), id]);
+    else if (action === "setSubjects") {
+      // Which subjects (college > university > year > term > subject) this course's
+      // instructor is offering under. This is what the lock logic and the student
+      // catalog filter key off of — see subject_locks / course_subjects in schema.sql.
+      const subjectIds = Array.isArray(data.subjectIds) ? [...new Set(data.subjectIds.map((v) => Number(v)).filter((v) => Number.isInteger(v)))] : [];
+      if (subjectIds.length) {
+        const found = await rows<{ id: number }>("SELECT id FROM subjects WHERE id=ANY($1::bigint[])", [subjectIds]);
+        if (found.length !== subjectIds.length) return Response.json({ error: "One or more subjects were not found" }, { status: 400 });
+      }
+      await pool.query("DELETE FROM course_subjects WHERE course_id=$1", [id]);
+      for (const subjectId of subjectIds) await pool.query("INSERT INTO course_subjects (course_id,subject_id) VALUES ($1,$2) ON CONFLICT DO NOTHING", [id, subjectId]);
+    }
     else return Response.json({ error: "Unsupported action" }, { status: 400 });
     return Response.json({ ok: true });
   } catch (error) { return apiError(error, "Courses POST error"); }

@@ -12,6 +12,13 @@ try {
   await client.query("ALTER TABLE lessons ADD COLUMN IF NOT EXISTS section_type TEXT NOT NULL DEFAULT 'full_curriculum'");
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS level TEXT NOT NULL DEFAULT ''");
   await client.query("ALTER TABLE access_codes ALTER COLUMN student_email DROP NOT NULL");
+  // Student's current academic placement (college/university/year/term). Informational
+  // and editable any time from the profile — never used to recompute an existing
+  // subject_locks row, which is written once at redemption time and stays fixed.
+  await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS college_id BIGINT REFERENCES colleges(id) ON DELETE SET NULL");
+  await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS university_id BIGINT REFERENCES universities(id) ON DELETE SET NULL");
+  await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS year_id BIGINT REFERENCES academic_years(id) ON DELETE SET NULL");
+  await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS term_id BIGINT REFERENCES terms(id) ON DELETE SET NULL");
   const cleanupKey = "demo_catalog_removed_20260907";
   const existing = await client.query("SELECT value FROM app_settings WHERE key=$1", [cleanupKey]);
   if (!existing.rowCount) {

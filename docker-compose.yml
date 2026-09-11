@@ -21,7 +21,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL_DOCKER:-postgresql://atlas:atlas_change_me@db:5432/atlas_learning}
       UPLOAD_DIR: /app/data/uploads
-    command: ["sh", "-c", "node scripts/migrate.mjs && node scripts/seed.mjs"]
+    command: ["sh", "-c", "node scripts/migrate.mjs && node scripts/seed.mjs && node scripts/seed-academic.mjs"]
     volumes:
       - atlas_uploads:/app/data/uploads
     depends_on:

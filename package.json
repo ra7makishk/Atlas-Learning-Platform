@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "node scripts/migrate.mjs",
     "db:seed": "node scripts/seed.mjs",
-    "db:setup": "npm run db:migrate && npm run db:seed",
+    "db:seed-academic": "node scripts/seed-academic.mjs",
+    "db:setup": "npm run db:migrate && npm run db:seed && npm run db:seed-academic",
     "test:schema": "node scripts/check-schema.mjs",
     "verify": "npm run test:schema && npm run typecheck && npm run lint && npm run build"
   },

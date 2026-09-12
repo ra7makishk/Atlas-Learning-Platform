@@ -750,6 +750,41 @@ function Notifications({ rows, act }: { rows: AnyRow[]; act: (action: string, da
   return <section className="workspace-panel"><div className="panel-heading"><div><p>COURSE-SCOPED UPDATES</p><h2>Your notifications</h2></div>{unread ? <button className="outline-button" onClick={() => void act("markNotificationsRead", {})}>Mark all read ({unread})</button> : <span className="status-chip">All read</span>}</div>{rows.length ? <div className="notification-list">{rows.map((row) => <article className={row.read ? "" : "unread"} key={String(row.id)}><i /><div><small>{String(row.courseTitle || "Platform")}</small><b>{String(row.title)}</b><p>{String(row.message)}</p><time>{String(row.created_at)}</time></div>{!row.read ? <button onClick={() => void act("markNotificationRead", { id: row.id })}>Mark read</button> : null}</article>)}</div> : <EmptyState>New material, replies, and course updates will appear here.</EmptyState>}</section>;
 }
 
+function BroadcastComposer({ data, act }: { data: WorkspaceData; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+  const isAdmin = data.user.role === "admin";
+  const scopes = isAdmin
+    ? [["all_students", "All students"], ["course_students", "Students of a specific course"], ["all_instructors", "All instructors"], ["specific", "A specific person"]]
+    : [["all_students", "All my students"], ["course_students", "Students of one of my courses"], ["specific", "A specific student"]];
+  const [scope, setScope] = useState(scopes[0][0]);
+  const [courseId, setCourseId] = useState(Number(data.courses[0]?.id || 0));
+  const [receiverEmail, setReceiverEmail] = useState("");
+  const [body, setBody] = useState("");
+  const [sending, setSending] = useState(false);
+  const ready = Boolean(body.trim()) && (scope !== "course_students" || courseId) && (scope !== "specific" || receiverEmail);
+
+  const send = async () => {
+    setSending(true);
+    try {
+      const payload: Record<string, unknown> = { scope, body };
+      if (scope === "course_students") payload.courseId = courseId;
+      if (scope === "specific") payload.receiverEmail = receiverEmail;
+      const ok = await act("broadcastMessage", payload);
+      if (ok) setBody("");
+    } finally { setSending(false); }
+  };
+
+  return <section className="workspace-panel compose-panel">
+    <div className="panel-heading"><div><p>BROADCAST</p><h2>Message a whole group at once</h2></div></div>
+    <div className="control-form">
+      <label>Send to<select value={scope} onChange={(event) => setScope(event.target.value)}>{scopes.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+      {scope === "course_students" ? <label>Course<select value={courseId} onChange={(event) => setCourseId(Number(event.target.value))}>{data.courses.map((course) => <option key={String(course.id)} value={String(course.id)}>{String(value(course, "titleEn", "title_en"))}</option>)}</select></label> : null}
+      {scope === "specific" ? <label>Recipient<select value={receiverEmail} onChange={(event) => setReceiverEmail(event.target.value)}><option value="">Choose a person</option>{data.users.map((row) => <option key={String(row.email)} value={String(row.email)}>{String(row.name || row.email)}{isAdmin ? ` — ${String(row.role)}` : ""}</option>)}</select></label> : null}
+      <label>Message<textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write the announcement…" /></label>
+      <button disabled={sending || !ready} className="workspace-primary" onClick={() => void send()}>Send broadcast <span>↗</span></button>
+    </div>
+  </section>;
+}
+
 function Messages({ data, act }: { data: WorkspaceData; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
   const student = data.user.role === "student";
   const eligible = useMemo(() => student ? data.courses.filter((course) => course.paymentStatus === "paid" && course.enrollmentStatus === "active") : data.courses, [data.courses, student]);
@@ -760,6 +795,11 @@ function Messages({ data, act }: { data: WorkspaceData; act: (action: string, da
   const [body, setBody] = useState("");
   const effectiveRecipient = student ? String(value(selected || {}, "instructorEmail", "instructor_email")) : recipient;
   const thread = data.messages.filter((message) => Number(message.course_id) === courseId);
-  if (!eligible.length) return <section className="workspace-panel"><div className="panel-heading"><div><p>COURSE CONVERSATIONS</p><h2>Messages</h2></div></div><EmptyState>{student ? "Messages become available after a paid course enrollment is active." : "Create a course and enroll a student before starting course messages."}</EmptyState></section>;
-  return <div className="message-layout"><section className="workspace-panel"><div className="panel-heading"><div><p>COURSE CONVERSATIONS</p><h2>{String(value(selected || {}, "titleEn", "title_en") || "Direct messages")}</h2></div><span className="status-chip">{thread.length} messages</span></div>{thread.length ? <div className="message-list">{thread.map((message) => <article key={String(message.id)} className={message.sender_email === data.user.email ? "mine" : ""}><small>{String(message.senderName || message.sender_email)} → {String(message.receiverName || message.receiver_email)}</small><p>{String(message.body)}</p><time>{String(message.created_at)}</time></article>)}</div> : <EmptyState>No messages in this course yet. Start the conversation from the form.</EmptyState>}</section><section className="workspace-panel compose-panel"><div className="panel-heading"><div><p>NEW MESSAGE</p><h2>Ask in context</h2></div></div><div className="control-form"><label>Course<select value={courseId} onChange={(event) => { setCourseId(Number(event.target.value)); setRecipient(""); }}>{eligible.map((course) => <option key={String(course.id)} value={String(course.id)}>{String(value(course, "titleEn", "title_en"))}</option>)}</select></label>{!student && <label>Active student<select value={recipient} onChange={(event) => setRecipient(event.target.value)}><option value="">Choose a student</option>{recipients.map((row) => <option key={String(row.user_email)} value={String(row.user_email)}>{String(row.studentName || row.user_email)}</option>)}</select></label>} {student ? <p className="message-recipient">To: {String(value(selected || {}, "instructorName", "instructor_name"))}</p> : null}<label>Message<textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write your course-specific message…" /></label><button disabled={!courseId || !effectiveRecipient || !body.trim()} className="workspace-primary" onClick={() => void act("sendMessage", { courseId, receiverEmail: effectiveRecipient, body }).then((ok) => ok && setBody(""))}>Send message <span>↗</span></button></div></section></div>;
+  return <div className="message-layout">
+    {!student ? <BroadcastComposer data={data} act={act} /> : null}
+    {!eligible.length ? <section className="workspace-panel"><div className="panel-heading"><div><p>COURSE CONVERSATIONS</p><h2>Messages</h2></div></div><EmptyState>{student ? "Messages become available after a paid course enrollment is active." : "Create a course and enroll a student before starting course messages."}</EmptyState></section> : <>
+      <section className="workspace-panel"><div className="panel-heading"><div><p>COURSE CONVERSATIONS</p><h2>{String(value(selected || {}, "titleEn", "title_en") || "Direct messages")}</h2></div><span className="status-chip">{thread.length} messages</span></div>{thread.length ? <div className="message-list">{thread.map((message) => <article key={String(message.id)} className={message.sender_email === data.user.email ? "mine" : ""}><small>{String(message.senderName || message.sender_email)} → {String(message.receiverName || message.receiver_email)}</small><p>{String(message.body)}</p><time>{String(message.created_at)}</time></article>)}</div> : <EmptyState>No messages in this course yet. Start the conversation from the form.</EmptyState>}</section>
+      <section className="workspace-panel compose-panel"><div className="panel-heading"><div><p>NEW MESSAGE</p><h2>Ask in context</h2></div></div><div className="control-form"><label>Course<select value={courseId} onChange={(event) => { setCourseId(Number(event.target.value)); setRecipient(""); }}>{eligible.map((course) => <option key={String(course.id)} value={String(course.id)}>{String(value(course, "titleEn", "title_en"))}</option>)}</select></label>{!student && <label>Active student<select value={recipient} onChange={(event) => setRecipient(event.target.value)}><option value="">Choose a student</option>{recipients.map((row) => <option key={String(row.user_email)} value={String(row.user_email)}>{String(row.studentName || row.user_email)}</option>)}</select></label>} {student ? <p className="message-recipient">To: {String(value(selected || {}, "instructorName", "instructor_name"))}</p> : null}<label>Message<textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Write your course-specific message…" /></label><button disabled={!courseId || !effectiveRecipient || !body.trim()} className="workspace-primary" onClick={() => void act("sendMessage", { courseId, receiverEmail: effectiveRecipient, body }).then((ok) => ok && setBody(""))}>Send message <span>↗</span></button></div></section>
+    </>}
+  </div>;
 }

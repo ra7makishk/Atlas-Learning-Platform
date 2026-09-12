@@ -292,6 +292,52 @@ if (action === "unlockSubject") {
       return Response.json({ ok: true });
     }
 
+    if (action === "broadcastMessage") {
+      if (!["admin", "instructor"].includes(user.role)) return Response.json({ error: "Instructor access required" }, { status: 403 });
+      const scope = clean(data.scope, 20), bodyText = clean(data.body, 1500);
+      if (!bodyText) return Response.json({ error: "A message is required" }, { status: 400 });
+
+      let recipients: string[] = [];
+      let courseId: number | null = null;
+
+      if (scope === "all_students") {
+        recipients = user.role === "admin"
+          ? (await rows<{ email: string }>("SELECT email FROM users WHERE role='student'")).map((row) => row.email)
+          : (await rows<{ email: string }>(
+              "SELECT DISTINCT e.user_email AS email FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE e.payment_status='paid' AND e.status='active' AND c.instructor_email=$1",
+              [user.email],
+            )).map((row) => row.email);
+      } else if (scope === "course_students") {
+        courseId = Number(data.courseId);
+        if (!Number.isInteger(courseId)) return Response.json({ error: "Choose a course" }, { status: 400 });
+        const course = await one<{ instructor_email: string }>("SELECT instructor_email FROM courses WHERE id=$1", [courseId]);
+        if (!course || (user.role === "instructor" && course.instructor_email !== user.email)) return Response.json({ error: "Course access denied" }, { status: 403 });
+        recipients = (await rows<{ email: string }>("SELECT user_email AS email FROM enrollments WHERE course_id=$1 AND payment_status='paid' AND status='active'", [courseId])).map((row) => row.email);
+      } else if (scope === "all_instructors") {
+        if (user.role !== "admin") return Response.json({ error: "Administrator access required" }, { status: 403 });
+        recipients = (await rows<{ email: string }>("SELECT email FROM users WHERE role='instructor'")).map((row) => row.email);
+      } else if (scope === "specific") {
+        const receiverEmail = clean(data.receiverEmail, 160).toLowerCase();
+        if (!receiverEmail) return Response.json({ error: "Choose a recipient" }, { status: 400 });
+        if (user.role === "instructor") {
+          const enrollment = await one("SELECT id FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE e.user_email=$1 AND c.instructor_email=$2 AND e.payment_status='paid' AND e.status='active'", [receiverEmail, user.email]);
+          if (!enrollment) return Response.json({ error: "Choose one of your own students" }, { status: 403 });
+        }
+        if (!await one("SELECT id FROM users WHERE email=$1", [receiverEmail])) return Response.json({ error: "Recipient account not found" }, { status: 404 });
+        recipients = [receiverEmail];
+      } else {
+        return Response.json({ error: "Choose who to message" }, { status: 400 });
+      }
+
+      recipients = Array.from(new Set(recipients)).filter((email) => email !== user.email);
+      if (!recipients.length) return Response.json({ error: "No matching recipients were found" }, { status: 404 });
+      for (const email of recipients) {
+        await pool.query("INSERT INTO messages (course_id,sender_email,receiver_email,body) VALUES ($1,$2,$3,$4)", [courseId, user.email, email, bodyText]);
+        await pool.query("INSERT INTO notifications (user_email,course_id,title,message) VALUES ($1,$2,$3,$4)", [email, courseId, "New message", `New message from ${user.name}.`]);
+      }
+      return Response.json({ ok: true, count: recipients.length }, { status: 201 });
+    }
+
     if (action === "sendMessage") {
       const courseId = Number(data.courseId), receiverEmail = clean(data.receiverEmail, 160).toLowerCase(), bodyText = clean(data.body, 1500);
       if (!Number.isInteger(courseId) || !receiverEmail || !bodyText) return Response.json({ error: "Course, recipient, and message are required" }, { status: 400 });

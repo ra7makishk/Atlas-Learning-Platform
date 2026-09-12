@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { PublicCourse, starterCourses } from "./course-data";
 import { publicConfig } from "../lib/public-config";
 
 type Locale = "en" | "ar";
@@ -40,11 +39,8 @@ const copy = {
 
 export default function HomeClient() {
   const [locale, setLocale] = useState<Locale>("en");
-  const [category, setCategory] = useState("All");
-  const [courses, setCourses] = useState<PublicCourse[]>(starterCourses);
+  const [announcements, setAnnouncements] = useState<{ id: number; kind: string; titleEn: string; titleAr: string; bodyEn: string; bodyAr: string; mediaUrl: string; linkUrl: string }[]>([]);
   const t = copy[locale];
-  const categories = useMemo(() => ["All", ...Array.from(new Set(courses.map((item) => item.categoryEn)))], [courses]);
-  const visibleCourses = category === "All" ? courses : courses.filter((item) => item.categoryEn === category);
 
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -52,11 +48,9 @@ export default function HomeClient() {
   }, [locale]);
 
   useEffect(() => {
-    fetch("/api/courses", { cache: "no-store" })
-      .then(async (response) => await response.json() as { courses?: PublicCourse[] })
-      .then((data) => {
-        if (Array.isArray(data.courses)) setCourses(data.courses);
-      })
+    fetch("/api/announcements", { cache: "no-store" })
+      .then(async (response) => await response.json() as { announcements?: typeof announcements })
+      .then((data) => { if (Array.isArray(data.announcements)) setAnnouncements(data.announcements); })
       .catch(() => undefined);
   }, []);
 
@@ -86,20 +80,18 @@ export default function HomeClient() {
 
       <section className="course-library shell" id="courses">
         <div className="section-title"><div><p className="micro-label">{t.browseLabel}</p><h2>{t.browse}</h2></div><p>{t.browseText}</p></div>
-        <div className="course-filter">
-          {categories.map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item === "All" ? t.all : locale === "en" ? item : courses.find((course) => course.categoryEn === item)?.categoryAr}</button>)}
-        </div>
-        {visibleCourses.length ? <div className="course-grid">
-          {visibleCourses.map((course, index) => <article className="course-card" key={course.id}>
-            <div className="course-cover"><img src={course.imageUrl} alt="" /><div className="course-cover-title"><p>{locale === "en" ? course.categoryEn : course.categoryAr}</p><h3>{locale === "en" ? course.titleEn : course.titleAr}</h3></div><span className="course-index">{String(index + 1).padStart(2, "0")}</span><span className="course-mode">{course.mode}</span></div>
-            <div className="course-body">
-              <p className="course-summary">{locale === "en" ? course.summaryEn : course.summaryAr}</p>
-              <p className="course-teacher">{t.by} <b>{course.instructorName}</b></p>
-              <div className="course-meta"><span>{course.level}</span><span>{course.duration}</span></div>
-              <div className="course-footer"><div><small>{t.studentsOnly}</small><strong>{course.price.toLocaleString()} {t.currency}</strong></div><Link href={`/courses/${course.slug}`}>{t.enroll} ↗</Link></div>
-            </div>
-          </article>)}
-        </div> : <div className="catalog-empty"><img src="/assets/4z-academy-logo.png" alt="" /><h3>{locale === "en" ? "Courses are coming soon" : "الكورسات قريبًا"}</h3><p>{t.emptyCourses}</p><a href="#contact">{locale === "en" ? "Contact 4Z Academy" : "تواصل مع 4Z Academy"} ↗</a></div>}
+        {announcements.length ? <div className="course-grid">
+          {announcements.map((item) => {
+            const title = locale === "en" ? item.titleEn : (item.titleAr || item.titleEn);
+            const body = locale === "en" ? item.bodyEn : (item.bodyAr || item.bodyEn);
+            const card = <article className="course-card" key={item.id}>
+              {item.kind === "image" && item.mediaUrl ? <div className="course-cover"><img src={item.mediaUrl} alt="" /></div> : null}
+              {item.kind === "video" && item.mediaUrl ? <div className="course-cover"><video src={item.mediaUrl} controls /></div> : null}
+              <div className="course-body"><h3>{title}</h3>{body ? <p className="course-summary">{body}</p> : null}</div>
+            </article>;
+            return item.linkUrl ? <a key={item.id} href={item.linkUrl} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>{card}</a> : card;
+          })}
+        </div> : <div className="catalog-empty"><img src="/assets/4z-academy-logo.png" alt="" /><h3>{locale === "en" ? "Announcements are coming soon" : "الإعلانات قريبًا"}</h3><p>{t.emptyCourses}</p><a href="#contact">{locale === "en" ? "Contact 4Z Academy" : "تواصل مع 4Z Academy"} ↗</a></div>}
       </section>
 
       <section className="journey" id="how">

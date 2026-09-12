@@ -72,6 +72,20 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, id: row?.id }, { status: 201 });
     }
 
+    if (action === "editCollege") {
+      const id = Number(data.id), nameAr = clean(data.nameAr, 160), nameEn = clean(data.nameEn, 160);
+      if (!Number.isInteger(id) || !nameAr || !nameEn) return Response.json({ error: "Arabic and English names are required" }, { status: 400 });
+      await pool.query("UPDATE colleges SET name_ar=$1,name_en=$2 WHERE id=$3", [nameAr, nameEn, id]);
+      return Response.json({ ok: true });
+    }
+
+    if (action === "editUniversity") {
+      const id = Number(data.id), nameAr = clean(data.nameAr, 160), nameEn = clean(data.nameEn, 160);
+      if (!Number.isInteger(id) || !nameAr || !nameEn) return Response.json({ error: "Arabic and English names are required" }, { status: 400 });
+      await pool.query("UPDATE universities SET name_ar=$1,name_en=$2 WHERE id=$3", [nameAr, nameEn, id]);
+      return Response.json({ ok: true });
+    }
+
     if (action === "deleteCollege" || action === "deleteUniversity" || action === "deleteYear" || action === "deleteTerm" || action === "deleteSubject") {
       const id = Number(data.id);
       if (!Number.isInteger(id)) return Response.json({ error: "Invalid id" }, { status: 400 });

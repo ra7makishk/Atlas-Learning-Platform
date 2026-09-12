@@ -17,9 +17,9 @@ export async function POST(request: Request) {
     // Every step has to actually belong to the one before it, or a mismatched
     // set of ids (sent directly to the API rather than picked in order in the UI)
     // would silently record the wrong academic placement.
-    const university = await one<{ id: number; college_id: number }>("SELECT id,college_id FROM universities WHERE id=$1", [universityId]);
-    const year = await one<{ id: number; university_id: number }>("SELECT id,university_id FROM academic_years WHERE id=$1", [yearId]);
-    if (!university || university.college_id !== collegeId || !year || year.university_id !== universityId) {
+    const university = await one<{ id: number; college_id: string }>("SELECT id,college_id FROM universities WHERE id=$1", [universityId]);
+    const year = await one<{ id: number; university_id: string }>("SELECT id,university_id FROM academic_years WHERE id=$1", [yearId]);
+    if (!university || Number(university.college_id) !== collegeId || !year || Number(year.university_id) !== universityId) {
       return Response.json({ error: "Choose your college, university, and year in order" }, { status: 400 });
     }
     const exists = await one("SELECT id FROM users WHERE email=$1", [email]);

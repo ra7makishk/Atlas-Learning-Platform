@@ -11,14 +11,12 @@ const publicSelect = `SELECT id,slug,title_en AS "titleEn",title_ar AS "titleAr"
 
 export async function GET() {
   try {
-    // The public catalog is unauthenticated by default (visitors and students need
-    // to browse every instructor's courses to choose one). The one exception: a
-    // signed-in instructor browsing the public site should only see their own
-    // course(s), never a competing instructor's — so a session is checked here even
-    // though none is required to call this endpoint.
-    const user = await currentUser();
-    const courses = user?.role === "instructor"
-      ? await rows(`${publicSelect} WHERE published=TRUE AND instructor_email=$1 ORDER BY id`, [user.email])
+    // On the public site (and course detail pages), a logged-in instructor should
+    // only ever see their own courses — never another instructor's. Everyone else
+    // (guests, students, admins) keeps seeing the full published catalog.
+    const viewer = await currentUser();
+    const courses = viewer && viewer.role === "instructor"
+      ? await rows(`${publicSelect} WHERE published=TRUE AND instructor_email=$1 ORDER BY id`, [viewer.email])
       : await rows(`${publicSelect} WHERE published=TRUE ORDER BY id`);
     return Response.json({ courses });
   }

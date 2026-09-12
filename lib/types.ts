@@ -10,9 +10,11 @@ export type PlatformUser = {
   country: string;
   city: string;
   specialty: string;
+  stage: string;
   level: string;
   collegeId: number | null;
   universityId: number | null;
   yearId: number | null;
+  onboardingChoice: string;
   trustedDeviceId: string | null;
 };

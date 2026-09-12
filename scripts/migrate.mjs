@@ -11,6 +11,8 @@ try {
   await client.query(sql);
   await client.query("ALTER TABLE lessons ADD COLUMN IF NOT EXISTS section_type TEXT NOT NULL DEFAULT 'full_curriculum'");
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS level TEXT NOT NULL DEFAULT ''");
+  await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT 'university'");
+  await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_choice TEXT NOT NULL DEFAULT ''");
   await client.query("ALTER TABLE access_codes ALTER COLUMN student_email DROP NOT NULL");
   // Student's current academic placement (college/university/year/term). Informational
   // and editable any time from the profile — never used to recompute an existing

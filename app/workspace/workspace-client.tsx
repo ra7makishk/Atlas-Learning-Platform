@@ -105,6 +105,7 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const role = data.user?.role || initialUser.role;
+  const needsOnboarding = role === "student" && data.user.status === "approved" && !data.user.onboardingChoice;
   const t = labels[locale];
 
   const load = useCallback(async (knownDevice?: string) => {
@@ -214,7 +215,8 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
         {busy && <div className="workspace-loader"><i /><span>Syncing your learning space…</span></div>}
 
         {!busy && role === "student" && data.user.status !== "approved" ? <PendingProfile user={data.user} academic={data.academic} act={act} /> : null}
-        {!busy && (role !== "student" || data.user.status === "approved") && active === "overview" && <ManagerOverview data={data} role={role} />}
+        {!busy && needsOnboarding ? <OnboardingGate act={act} onAnswered={(choice) => setActive(choice === "yes" ? "activate" : "discover")} /> : null}
+        {!busy && !needsOnboarding && (role !== "student" || data.user.status === "approved") && active === "overview" && <ManagerOverview data={data} role={role} />}
         {!busy && active === "courses" && role !== "student" && <CourseManager courses={data.courses} saveCourse={saveCourse} manageCourse={manageCourse} saveSubjects={saveSubjects} academic={data.academic} role={role} />}
         {!busy && active === "studio" && role !== "student" && <ContentStudio courses={data.courses} lessons={data.lessons} act={act} />}
         {!busy && active === "academic" && role === "admin" && <AcademicManager academic={data.academic} act={academicAction} />}
@@ -224,12 +226,12 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
         {!busy && active === "payments" && role === "admin" && <PaymentManager payments={data.payments} act={act} />}
         {!busy && active === "devices" && role === "admin" && <DeviceManager rows={data.deviceRequests} act={act} />}
         {!busy && active === "protection" && role !== "student" && <ProtectedPlayer name={data.user.name} email={data.user.email} />}
-        {!busy && active === "learning" && role === "student" && data.user.status === "approved" && <MyLearning data={data} />}
-        {!busy && active === "activate" && role === "student" && data.user.status === "approved" && <ActivateCode accessCodes={data.accessCodes} act={act} />}
-        {!busy && active === "discover" && role === "student" && data.user.status === "approved" && <Discover courses={data.courses} demoPayments={data.demoPayments} act={act} />}
-        {!busy && active === "notifications" && (role !== "student" || data.user.status === "approved") && <Notifications rows={data.notifications} act={act} />}
-        {!busy && active === "messages" && (role !== "student" || data.user.status === "approved") && <Messages data={data} act={act} />}
-        {!busy && active === "profile" && role === "student" && data.user.status === "approved" && <ProfileForm user={data.user} academic={data.academic} act={act} />}
+        {!busy && !needsOnboarding && active === "learning" && role === "student" && data.user.status === "approved" && <MyLearning data={data} />}
+        {!busy && !needsOnboarding && active === "activate" && role === "student" && data.user.status === "approved" && <ActivateCode accessCodes={data.accessCodes} act={act} />}
+        {!busy && !needsOnboarding && active === "discover" && role === "student" && data.user.status === "approved" && <Discover courses={data.courses} demoPayments={data.demoPayments} act={act} />}
+        {!busy && !needsOnboarding && active === "notifications" && (role !== "student" || data.user.status === "approved") && <Notifications rows={data.notifications} act={act} />}
+        {!busy && !needsOnboarding && active === "messages" && (role !== "student" || data.user.status === "approved") && <Messages data={data} act={act} />}
+        {!busy && !needsOnboarding && active === "profile" && role === "student" && data.user.status === "approved" && <ProfileForm user={data.user} academic={data.academic} act={act} />}
       </section>
     </main>
   );
@@ -449,22 +451,45 @@ function AcademicManager({ academic, act }: { academic: AcademicData; act: (acti
   </div>;
 }
 
+function OnboardingGate({ act, onAnswered }: { act: (action: string, data: Record<string, unknown>) => Promise<boolean>; onAnswered: (choice: "yes" | "no") => void }) {
+  const [busy, setBusy] = useState(false);
+  const answer = async (choice: "yes" | "no") => {
+    setBusy(true);
+    const ok = await act("onboarding", { choice });
+    setBusy(false);
+    if (ok) onAnswered(choice);
+  };
+  return <section className="workspace-panel onboarding-gate"><div className="panel-heading"><div><p>ONE QUICK QUESTION</p><h2>Are you already enrolled in a specific course?</h2></div></div><p>This helps us take you to the right place. You can always switch between activating a code and browsing courses later.</p><div className="two-auth-fields"><button className="workspace-primary" disabled={busy} onClick={() => void answer("yes")}>Yes, I have a code <span>↗</span></button><button className="outline-button" disabled={busy} onClick={() => void answer("no")}>No, show me the courses</button></div></section>;
+}
+
 function PendingProfile({ user, academic, act }: { user: PlatformUser; academic: AcademicData; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
   return <div className="pending-layout"><section><p className="micro-label">APPLICATION STATUS</p><h2>{user.status === "needs_changes" ? "Your profile needs an update." : "Complete your student profile."}</h2><p>Course payment and enrollment become available after an administrator or instructor reviews your information.</p><ol><li className="done">Account created</li><li className={user.phone ? "done" : ""}>Full profile submitted</li><li>Academic review</li><li>Course enrollment</li></ol></section><ProfileForm user={user} academic={academic} act={act} /></div>;
 }
 
+const HIGH_SCHOOL_GRADES: { value: string; label: string }[] = [
+  { value: "first_secondary", label: "First Secondary" },
+  { value: "second_secondary", label: "Second Secondary" },
+  { value: "third_secondary", label: "Third Secondary" },
+];
+
 function ProfileForm({ user, academic, act }: { user: PlatformUser; academic: AcademicData; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
   const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "", whatsapp: user.whatsapp || "", country: user.country || "", city: user.city || "", specialty: user.specialty || "" });
+  const [stage, setStage] = useState(user.stage || "");
+  const [level, setLevel] = useState(user.level || "");
   const [collegeId, setCollegeId] = useState(user.collegeId ? String(user.collegeId) : "");
   const [universityId, setUniversityId] = useState(user.universityId ? String(user.universityId) : "");
   const [yearId, setYearId] = useState(user.yearId ? String(user.yearId) : "");
   const universities = academic.universities.filter((row) => String(row.collegeId) === collegeId);
   const years = academic.years.filter((row) => String(row.universityId) === universityId);
-  const submit = (event: React.FormEvent) => { event.preventDefault(); void act("profile", { ...form, collegeId: Number(collegeId), universityId: Number(universityId), yearId: Number(yearId) }); };
+  const submit = (event: React.FormEvent) => { event.preventDefault(); void act("profile", { ...form, stage, level: stage === "high_school" ? level : "", collegeId: stage === "university" ? Number(collegeId) : null, universityId: stage === "university" ? Number(universityId) : null, yearId: stage === "university" ? Number(yearId) : null }); };
   return <section className="workspace-panel profile-form"><div className="panel-heading"><div><p>STUDENT DETAILS</p><h2>Clear, reviewable information</h2></div></div><form className="control-form two-column" onSubmit={submit}>{Object.entries({ name: "Full legal name", phone: "Phone number", whatsapp: "WhatsApp number", country: "Country", city: "City", specialty: "Field of study / work" }).map(([name, label]) => <label key={name}>{label}<input required={["name", "phone"].includes(name)} value={form[name as keyof typeof form]} onChange={(event) => setForm({ ...form, [name]: event.target.value })} /></label>)}
-    <label>College<select required value={collegeId} onChange={(event) => { setCollegeId(event.target.value); setUniversityId(""); setYearId(""); }}><option value="" disabled>Choose your college</option>{academic.colleges.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
-    <label>University<select required disabled={!collegeId} value={universityId} onChange={(event) => { setUniversityId(event.target.value); setYearId(""); }}><option value="" disabled>Choose your university</option>{universities.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
-    <label>Year<select required disabled={!universityId} value={yearId} onChange={(event) => setYearId(event.target.value)}><option value="" disabled>Choose your year</option>{years.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+    <label>Education stage<select required value={stage} onChange={(event) => { setStage(event.target.value); setCollegeId(""); setUniversityId(""); setYearId(""); setLevel(""); }}><option value="" disabled>Choose your stage</option><option value="high_school">High school</option><option value="university">University</option><option value="graduate">Graduate</option></select></label>
+    {stage === "high_school" && <label>Grade<select required value={level} onChange={(event) => setLevel(event.target.value)}><option value="" disabled>Choose your grade</option>{HIGH_SCHOOL_GRADES.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label>}
+    {stage === "university" && <>
+      <label>College<select required value={collegeId} onChange={(event) => { setCollegeId(event.target.value); setUniversityId(""); setYearId(""); }}><option value="" disabled>Choose your college</option>{academic.colleges.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+      <label>University<select required disabled={!collegeId} value={universityId} onChange={(event) => { setUniversityId(event.target.value); setYearId(""); }}><option value="" disabled>Choose your university</option>{universities.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+      <label>Year<select required disabled={!universityId} value={yearId} onChange={(event) => setYearId(event.target.value)}><option value="" disabled>Choose your year</option>{years.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+    </>}
     <button className="workspace-primary wide" type="submit">Submit for review <span>↗</span></button></form></section>;
 }
 

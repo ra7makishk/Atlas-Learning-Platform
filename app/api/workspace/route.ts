@@ -255,6 +255,21 @@ if (action === "unlockSubject") {
       return Response.json({ ok: true }, { status: 201 });
     }
 
+    if (action === "editLesson") {
+      if (!["admin", "instructor"].includes(user.role)) return Response.json({ error: "Instructor access required" }, { status: 403 });
+      const id = Number(data.id);
+      const lesson = await one<{ id: number; course_id: number; instructor_email: string }>(`SELECT l.id,l.course_id,c.instructor_email FROM lessons l JOIN courses c ON c.id=l.course_id WHERE l.id=$1`, [id]);
+      if (!lesson || (user.role === "instructor" && lesson.instructor_email !== user.email)) return Response.json({ error: "Lesson access denied" }, { status: 403 });
+      const title = clean(data.title, 160), kind = clean(data.kind, 30) || "video", assetUrl = clean(data.assetUrl, 500), duration = clean(data.duration, 80);
+      if (!title || !["video", "live", "file"].includes(kind)) return Response.json({ error: "Valid lesson title and type are required" }, { status: 400 });
+      if (!assetUrl || !validAssetUrl(assetUrl)) return Response.json({ error: kind === "live" ? "Add a secure HTTPS meeting link" : "Upload a file or add a secure HTTPS media link" }, { status: 400 });
+      if (kind === "live" && !duration) return Response.json({ error: "Add the live session date and time" }, { status: 400 });
+      const sectionType = clean(data.sectionType, 40) || "full_curriculum";
+      if (!planTypes.includes(sectionType)) return Response.json({ error: "Invalid section type" }, { status: 400 });
+      await pool.query("UPDATE lessons SET title=$1,kind=$2,asset_url=$3,duration=$4,section_type=$5 WHERE id=$6", [title, kind, assetUrl, duration, sectionType, id]);
+      return Response.json({ ok: true });
+    }
+
     if (action === "deleteLesson" || action === "moveLesson") {
       if (!["admin", "instructor"].includes(user.role)) return Response.json({ error: "Instructor access required" }, { status: 403 });
       const id = Number(data.id);

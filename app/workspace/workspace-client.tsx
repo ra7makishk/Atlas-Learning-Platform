@@ -303,15 +303,38 @@ function CourseManager({ courses, saveCourse, manageCourse, saveSubjects, saveTa
 function TargetPicker({ courseId, initialTargets, academic, onSave }: { courseId: number; initialTargets: { collegeId: number; universityId: number; yearId: number }[]; academic: AcademicData; onSave: (courseId: number, targets: { collegeId: number; universityId: number; yearId: number }[]) => Promise<boolean> }) {
   const key = (row: { collegeId: number; universityId: number; yearId: number }) => `${row.collegeId}-${row.universityId}-${row.yearId}`;
   const [selected, setSelected] = useState<Set<string>>(new Set(initialTargets.map(key)));
+  const [query, setQuery] = useState("");
+  const [forceOpen, setForceOpen] = useState<boolean | null>(null);
+  const q = query.trim().toLowerCase();
   const toggle = (row: { collegeId: number; universityId: number; yearId: number }) => setSelected((current) => {
     const next = new Set(current); const k = key(row);
     if (next.has(k)) next.delete(k); else next.add(k);
     return next;
   });
   if (!academic.colleges.length) return <EmptyState>Add colleges, universities, and years from the Academic structure tab first.</EmptyState>;
+  const collegesSorted = [...academic.colleges].sort((a, b) => a.nameEn.localeCompare(b.nameEn));
+  let visibleColleges = 0;
   return <div className="control-form">
-    <p>Leave everything unchecked to show this course to every student.</p>
-    <div className="subject-picker">{academic.colleges.map((college) => <details key={college.id}><summary>{college.nameEn}</summary>{academic.universities.filter((university) => university.collegeId === college.id).map((university) => <details key={university.id}><summary>{university.nameEn}</summary><div className="subject-term-group">{academic.years.filter((year) => year.universityId === university.id).map((year) => { const row = { collegeId: college.id, universityId: university.id, yearId: year.id }; return <label key={year.id} className="subject-checkbox"><input type="checkbox" checked={selected.has(key(row))} onChange={() => toggle(row)} />{year.nameEn}</label>; })}</div></details>)}</details>)}</div>
+    <div className="tree-toolbar">
+      <input className="tree-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search college, university, or year…" />
+      <button className="outline-button" onClick={() => setForceOpen(true)}>Expand all</button>
+      <button className="outline-button" onClick={() => setForceOpen(false)}>Collapse all</button>
+      {selected.size ? <button className="outline-button" onClick={() => setSelected(new Set())}>Clear ({selected.size})</button> : null}
+    </div>
+    <p>{selected.size ? `${selected.size} target${selected.size === 1 ? "" : "s"} selected.` : "Leave everything unchecked to show this course to every student."}</p>
+    <div className="subject-picker">{collegesSorted.map((college) => {
+      const universities = academic.universities.filter((university) => university.collegeId === college.id).sort((a, b) => a.nameEn.localeCompare(b.nameEn)).map((university) => ({ university, years: academic.years.filter((year) => year.universityId === university.id).sort((a, b) => a.nameEn.localeCompare(b.nameEn)) }));
+      const collegeMatches = !q || college.nameEn.toLowerCase().includes(q);
+      const visibleUniversities = universities.filter(({ university, years }) => collegeMatches || university.nameEn.toLowerCase().includes(q) || years.some((year) => year.nameEn.toLowerCase().includes(q)));
+      if (q && !visibleUniversities.length) return null;
+      visibleColleges++;
+      return <details key={college.id} open={forceOpen ?? Boolean(q)}><summary>{college.nameEn}</summary>{visibleUniversities.map(({ university, years }) => {
+        const universityMatches = collegeMatches || university.nameEn.toLowerCase().includes(q);
+        const visibleYears = years.filter((year) => !q || universityMatches || year.nameEn.toLowerCase().includes(q));
+        return <details key={university.id} open={forceOpen ?? Boolean(q)}><summary>{university.nameEn}</summary><div className="subject-term-group">{visibleYears.map((year) => { const row = { collegeId: college.id, universityId: university.id, yearId: year.id }; return <label key={year.id} className="subject-checkbox"><input type="checkbox" checked={selected.has(key(row))} onChange={() => toggle(row)} />{year.nameEn}</label>; })}</div></details>;
+      })}</details>;
+    })}</div>
+    {q && !visibleColleges ? <EmptyState>No college, university, or year matches "{query}".</EmptyState> : null}
     <button className="workspace-primary" onClick={() => void onSave(courseId, Array.from(selected).map((k) => { const [collegeId, universityId, yearId] = k.split("-").map(Number); return { collegeId, universityId, yearId }; }))}>Save target audience <span>↗</span></button>
   </div>;
 }
@@ -322,16 +345,40 @@ function TargetPicker({ courseId, initialTargets, academic, onSave }: { courseId
 // picking the right subject among many is still findable.
 function SubjectPicker({ courseId, initialSubjectIds, academic, onSave }: { courseId: number; initialSubjectIds: number[]; academic: AcademicData; onSave: (courseId: number, subjectIds: number[]) => Promise<boolean> }) {
   const [selected, setSelected] = useState<number[]>(initialSubjectIds);
+  const [query, setQuery] = useState("");
+  const [forceOpen, setForceOpen] = useState<boolean | null>(null);
+  const q = query.trim().toLowerCase();
   const toggle = (id: number) => setSelected((current) => current.includes(id) ? current.filter((row) => row !== id) : [...current, id]);
   if (!academic.colleges.length) return <EmptyState>Add colleges, universities, years, terms, and subjects from the Academic structure tab first.</EmptyState>;
+  const collegesSorted = [...academic.colleges].sort((a, b) => a.nameEn.localeCompare(b.nameEn));
+  let matchedSubjects = 0;
+  const tree = collegesSorted.map((college) => {
+    const universities = academic.universities.filter((university) => university.collegeId === college.id).sort((a, b) => a.nameEn.localeCompare(b.nameEn)).map((university) => ({
+      university,
+      years: academic.years.filter((year) => year.universityId === university.id).sort((a, b) => a.nameEn.localeCompare(b.nameEn)).map((year) => ({
+        year,
+        terms: academic.terms.filter((term) => term.yearId === year.id).map((term) => ({ term, subjects: academic.subjects.filter((subject) => subject.termId === term.id).filter((subject) => !q || subject.nameEn.toLowerCase().includes(q) || term.nameEn.toLowerCase().includes(q) || year.nameEn.toLowerCase().includes(q) || university.nameEn.toLowerCase().includes(q) || college.nameEn.toLowerCase().includes(q)) })).filter(({ subjects }) => subjects.length),
+      })).filter(({ terms }) => terms.length),
+    })).filter(({ years }) => years.length);
+    return { college, universities };
+  }).filter(({ universities }) => universities.length);
   return <div className="control-form">
-    <div className="subject-picker">{academic.colleges.map((college) => <details key={college.id}><summary>{college.nameEn}</summary>{academic.universities.filter((university) => university.collegeId === college.id).map((university) => <details key={university.id}><summary>{university.nameEn}</summary>{academic.years.filter((year) => year.universityId === university.id).map((year) => <details key={year.id}><summary>{year.nameEn}</summary>{academic.terms.filter((term) => term.yearId === year.id).map((term) => <div key={term.id} className="subject-term-group"><b>{term.nameEn}</b>{academic.subjects.filter((subject) => subject.termId === term.id).map((subject) => <label key={subject.id} className="subject-checkbox"><input type="checkbox" checked={selected.includes(subject.id)} onChange={() => toggle(subject.id)} />{subject.nameEn}</label>)}</div>)}</details>)}</details>)}</details>)}</div>
+    <div className="tree-toolbar">
+      <input className="tree-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search college, university, year, term, or subject…" />
+      <button className="outline-button" onClick={() => setForceOpen(true)}>Expand all</button>
+      <button className="outline-button" onClick={() => setForceOpen(false)}>Collapse all</button>
+      {selected.length ? <button className="outline-button" onClick={() => setSelected([])}>Clear ({selected.length})</button> : null}
+    </div>
+    <p>{selected.length ? `${selected.length} subject${selected.length === 1 ? "" : "s"} selected.` : "Pick every subject this course satisfies."}</p>
+    <div className="subject-picker">{tree.map(({ college, universities }) => <details key={college.id} open={forceOpen ?? Boolean(q)}><summary>{college.nameEn}</summary>{universities.map(({ university, years }) => <details key={university.id} open={forceOpen ?? Boolean(q)}><summary>{university.nameEn}</summary>{years.map(({ year, terms }) => { matchedSubjects += terms.reduce((sum, { subjects }) => sum + subjects.length, 0); return <details key={year.id} open={forceOpen ?? Boolean(q)}><summary>{year.nameEn}</summary>{terms.map(({ term, subjects }) => <div key={term.id} className="subject-term-group"><b>{term.nameEn}</b>{subjects.map((subject) => <label key={subject.id} className="subject-checkbox"><input type="checkbox" checked={selected.includes(subject.id)} onChange={() => toggle(subject.id)} />{subject.nameEn}</label>)}</div>)}</details>; })}</details>)}</details>)}</div>
+    {q && !matchedSubjects ? <EmptyState>No subject matches "{query}".</EmptyState> : null}
     <button className="workspace-primary" onClick={() => void onSave(courseId, selected)}>Save subjects <span>↗</span></button>
   </div>;
 }
 
 function ContentStudio({ courses, lessons, act }: { courses: AnyRow[]; lessons: AnyRow[]; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
   const [courseId, setCourseId] = useState(Number(courses[0]?.id || 0));
+  const [editingLessonId, setEditingLessonId] = useState<number | null>(null);
   const [title, setTitle] = useState("");
   const [kind, setKind] = useState("video");
   const [assetUrl, setAssetUrl] = useState("");
@@ -345,6 +392,18 @@ function ContentStudio({ courses, lessons, act }: { courses: AnyRow[]; lessons: 
   const selectedLessons = lessons.filter((lesson) => Number(lesson.course_id) === courseId);
   const secureAsset = assetUrl ? isSecureUrl(assetUrl) : false;
   const canPublish = Boolean(courseId && title.trim() && assetUrl && secureAsset && (kind !== "live" || duration.trim()));
+
+  const resetForm = () => { setEditingLessonId(null); setTitle(""); setKind("video"); setAssetUrl(""); setDuration(""); setSectionType("full_curriculum"); setUploadInfo(""); setUploadProgress(0); };
+
+  const editLesson = (lesson: AnyRow) => {
+    setEditingLessonId(Number(lesson.id));
+    setTitle(String(lesson.title || ""));
+    setKind(String(lesson.kind || "video"));
+    setAssetUrl(String(value(lesson, "assetUrl", "asset_url") || ""));
+    setDuration(String(lesson.duration || ""));
+    setSectionType(String(value(lesson, "sectionType", "section_type") || "full_curriculum"));
+    setUploadInfo(""); setUploadProgress(0);
+  };
 
   const chooseKind = (nextKind: string) => {
     setKind(nextKind);
@@ -373,8 +432,8 @@ function ContentStudio({ courses, lessons, act }: { courses: AnyRow[]; lessons: 
 
   return <div className="studio-grid">
     <section className="workspace-panel studio-create">
-      <div className="panel-heading"><div><p>CONTENT STUDIO</p><h2>Add learning material</h2></div><span className="status-chip">Private until enrolled</span></div>
-      <div className="studio-course"><label>Course<select value={courseId} onChange={(event) => { setCourseId(Number(event.target.value)); setAssetUrl(""); setUploadInfo(""); }}>{courses.map((course) => <option key={String(course.id)} value={String(course.id)}>{String(value(course, "titleEn", "title_en"))}</option>)}</select></label><p>{selectedCourse?.published ? "This course is public. Enrolled students will be notified." : "This course is still a draft. Its material remains hidden from students."}</p></div>
+      <div className="panel-heading"><div><p>CONTENT STUDIO</p><h2>{editingLessonId ? "Update learning material" : "Add learning material"}</h2></div><span className="status-chip">Private until enrolled</span></div>
+      <div className="studio-course"><label>Course<select disabled={Boolean(editingLessonId)} value={courseId} onChange={(event) => { setCourseId(Number(event.target.value)); resetForm(); }}>{courses.map((course) => <option key={String(course.id)} value={String(course.id)}>{String(value(course, "titleEn", "title_en"))}</option>)}</select></label><p>{selectedCourse?.published ? "This course is public. Enrolled students will be notified." : "This course is still a draft. Its material remains hidden from students."}</p></div>
       <div className="format-picker" role="group" aria-label="Content type">
         <button className={kind === "video" ? "active" : ""} onClick={() => chooseKind("video")}><b>▶</b><span>Recorded video<small>Upload MP4/WebM or use a secure media URL</small></span></button>
         <button className={kind === "live" ? "active" : ""} onClick={() => chooseKind("live")}><b>●</b><span>Live session<small>Add a meeting link and clear schedule</small></span></button>
@@ -386,14 +445,17 @@ function ContentStudio({ courses, lessons, act }: { courses: AnyRow[]; lessons: 
         <label>Section / package<select value={sectionType} onChange={(event) => setSectionType(event.target.value)}>{Object.entries(planLabels).map(([id,label]) => <option key={id} value={id}>{label}</option>)}</select></label>
         <label>{kind === "live" ? "Secure meeting URL" : "Secure media URL"}<input value={assetUrl} onChange={(event) => setAssetUrl(event.target.value)} placeholder={kind === "live" ? "https://meet.google.com/…" : "Upload below or paste an HTTPS URL"} /></label>
         {assetUrl && !secureAsset ? <p className="field-warning">Use an HTTPS link. Uploaded files are accepted automatically.</p> : null}
-        {kind !== "live" ? <><label className={`file-input ${uploading ? "uploading" : ""}`}>{uploading ? `Uploading ${uploadProgress}%` : kind === "video" ? "Choose a video file" : "Choose a PDF or image"}<input disabled={uploading} type="file" accept={kind === "video" ? "video/*" : ".pdf,image/*"} onChange={(event) => event.target.files?.[0] && void upload(event.target.files[0])} />{uploading ? <span style={{ width: `${uploadProgress}%` }} /> : null}</label>{uploadInfo ? <p className="upload-info">✓ {uploadInfo}</p> : <p className="upload-help">The original file stays behind signed-in course access.</p>}</> : <p className="upload-help">Only paid, active students in this course can see the live-room link.</p>}
-        <button disabled={uploading || !canPublish} className="workspace-primary" onClick={() => void act("addLesson", { courseId, title, kind, assetUrl, duration, sectionType }).then((ok) => { if (ok) { setTitle(""); setAssetUrl(""); setDuration(""); setUploadInfo(""); setUploadProgress(0); } })}>Add to course <span>↗</span></button>
+        {kind !== "live" ? <><label className={`file-input ${uploading ? "uploading" : ""}`}>{uploading ? `Uploading ${uploadProgress}%` : editingLessonId ? (kind === "video" ? "Choose a replacement video" : "Choose a replacement file") : kind === "video" ? "Choose a video file" : "Choose a PDF or image"}<input disabled={uploading} type="file" accept={kind === "video" ? "video/*" : ".pdf,image/*"} onChange={(event) => event.target.files?.[0] && void upload(event.target.files[0])} />{uploading ? <span style={{ width: `${uploadProgress}%` }} /> : null}</label>{uploadInfo ? <p className="upload-info">✓ {uploadInfo}</p> : editingLessonId ? <p className="upload-help">Choosing a new file replaces the current one; the lesson keeps its place in the list.</p> : <p className="upload-help">The original file stays behind signed-in course access.</p>}</> : <p className="upload-help">Only paid, active students in this course can see the live-room link.</p>}
+        <div className="row-actions">
+          <button disabled={uploading || !canPublish} className="workspace-primary" onClick={() => void act(editingLessonId ? "editLesson" : "addLesson", editingLessonId ? { id: editingLessonId, title, kind, assetUrl, duration, sectionType } : { courseId, title, kind, assetUrl, duration, sectionType }).then((ok) => { if (ok) resetForm(); })}>{editingLessonId ? "Save changes" : "Add to course"} <span>↗</span></button>
+          {editingLessonId ? <button className="outline-button" onClick={resetForm}>Cancel edit</button> : null}
+        </div>
       </div>
       {assetUrl && secureAsset ? <div className={`studio-preview ${kind}`}>{kind === "video" ? <video src={assetUrl} controls controlsList="nodownload noremoteplayback" disablePictureInPicture preload="metadata" /> : kind === "live" ? <><span>● LIVE PREVIEW</span><h3>{title || "Live session"}</h3><p>{duration || "Add the session time above"}</p><a href={assetUrl} target="_blank" rel="noreferrer">Test meeting link ↗</a></> : <><b>□</b><p>{title || "Protected file"}</p><small>The student will open this file inside the protected viewer.</small></>}</div> : null}
     </section>
     <section className="workspace-panel studio-library">
       <div className="panel-heading"><div><p>COURSE OUTLINE</p><h2>{String(value(selectedCourse || {}, "titleEn", "title_en"))}</h2></div><span className="status-chip">{selectedLessons.length} items</span></div>
-      {selectedLessons.length ? <div className="mini-list">{selectedLessons.map((lesson) => <div key={String(lesson.id)}><span>{lesson.kind === "video" ? "▶" : lesson.kind === "live" ? "●" : "□"}</span><p><b>{String(lesson.title)}</b><small>{String(lesson.kind)} · {String(lesson.duration || "No duration")}</small></p><div className="row-actions"><button onClick={() => void act("moveLesson", { id: lesson.id, direction: "up" })}>↑</button><button onClick={() => void act("moveLesson", { id: lesson.id, direction: "down" })}>↓</button><button className="danger-action" onClick={() => window.confirm("Delete this material permanently?") && void act("deleteLesson", { id: lesson.id })}>Delete</button></div></div>)}</div> : <EmptyState>No material in this course yet. Add a test video or live session from the studio.</EmptyState>}
+      {selectedLessons.length ? <div className="mini-list">{selectedLessons.map((lesson) => <div key={String(lesson.id)} className={editingLessonId === Number(lesson.id) ? "editing-row" : ""}><span>{lesson.kind === "video" ? "▶" : lesson.kind === "live" ? "●" : "□"}</span><p><b>{String(lesson.title)}</b><small>{String(lesson.kind)} · {String(lesson.duration || "No duration")}</small></p><div className="row-actions"><button onClick={() => editLesson(lesson)}>Edit</button><button onClick={() => void act("moveLesson", { id: lesson.id, direction: "up" })}>↑</button><button onClick={() => void act("moveLesson", { id: lesson.id, direction: "down" })}>↓</button><button className="danger-action" onClick={() => window.confirm("Delete this material permanently?") && void act("deleteLesson", { id: lesson.id }).then((ok) => { if (ok && editingLessonId === Number(lesson.id)) resetForm(); })}>Delete</button></div></div>)}</div> : <EmptyState>No material in this course yet. Add a test video or live session from the studio.</EmptyState>}
     </section>
   </div>;
 }
@@ -436,6 +498,12 @@ function AcademicManager({ academic, act }: { academic: AcademicData; act: (acti
   const [subjectForm, setSubjectForm] = useState({ termId: "", nameEn: "", nameAr: "" });
   const [editingCollege, setEditingCollege] = useState<{ id: number; nameEn: string; nameAr: string } | null>(null);
   const [editingUniversity, setEditingUniversity] = useState<{ id: number; nameEn: string; nameAr: string } | null>(null);
+  const [editingYear, setEditingYear] = useState<{ id: number; nameEn: string; nameAr: string; yearNumber: number } | null>(null);
+  const [editingTerm, setEditingTerm] = useState<{ id: number; nameEn: string; nameAr: string; termNumber: number } | null>(null);
+  const [editingSubject, setEditingSubject] = useState<{ id: number; nameEn: string; nameAr: string } | null>(null);
+  const [query, setQuery] = useState("");
+  const [forceOpen, setForceOpen] = useState<boolean | null>(null);
+  const q = query.trim().toLowerCase();
   const collegeName = (id: number) => academic.colleges.find((row) => row.id === id)?.nameEn || "—";
   const universityName = (id: number) => academic.universities.find((row) => row.id === id)?.nameEn || "—";
   const yearName = (id: number) => academic.years.find((row) => row.id === id)?.nameEn || "—";
@@ -477,25 +545,54 @@ function AcademicManager({ academic, act }: { academic: AcademicData; act: (acti
     </section>
     <section className="workspace-panel course-list-panel">
       <div className="panel-heading"><div><p>CURRENT TREE</p><h2>{academic.subjects.length} subjects</h2></div></div>
-      <div className="data-table">{academic.colleges.map((college) => <article key={college.id}>
-          {editingCollege?.id === college.id
-            ? <div className="two-auth-fields"><input value={editingCollege.nameEn} onChange={(e) => setEditingCollege({ ...editingCollege, nameEn: e.target.value })} /><input value={editingCollege.nameAr} onChange={(e) => setEditingCollege({ ...editingCollege, nameAr: e.target.value })} /></div>
-            : <div><b>{college.nameEn}</b><small>College</small></div>}
-          {editingCollege?.id === college.id
-            ? <><button className="workspace-primary" onClick={() => void act("editCollege", editingCollege).then((ok) => ok && setEditingCollege(null))}>Save</button><button className="outline-button" onClick={() => setEditingCollege(null)}>Cancel</button></>
-            : <><button className="outline-button" onClick={() => setEditingCollege({ id: college.id, nameEn: college.nameEn, nameAr: college.nameAr })}>Edit</button><button className="danger-action" onClick={() => window.confirm(`Delete "${college.nameEn}" and everything under it (universities, years, terms, subjects, and any course links)?`) && void act("deleteCollege", { id: college.id })}>Delete</button></>}
-        </article>)}
-        {academic.universities.map((university) => <article key={university.id}>
-          {editingUniversity?.id === university.id
-            ? <div className="two-auth-fields"><input value={editingUniversity.nameEn} onChange={(e) => setEditingUniversity({ ...editingUniversity, nameEn: e.target.value })} /><input value={editingUniversity.nameAr} onChange={(e) => setEditingUniversity({ ...editingUniversity, nameAr: e.target.value })} /></div>
-            : <div><b>{university.nameEn}</b><small>University of {collegeName(university.collegeId)}</small></div>}
-          {editingUniversity?.id === university.id
-            ? <><button className="workspace-primary" onClick={() => void act("editUniversity", editingUniversity).then((ok) => ok && setEditingUniversity(null))}>Save</button><button className="outline-button" onClick={() => setEditingUniversity(null)}>Cancel</button></>
-            : <><button className="outline-button" onClick={() => setEditingUniversity({ id: university.id, nameEn: university.nameEn, nameAr: university.nameAr })}>Edit</button><button className="danger-action" onClick={() => window.confirm(`Delete "${university.nameEn}" and everything under it?`) && void act("deleteUniversity", { id: university.id })}>Delete</button></>}
-        </article>)}
-        {academic.years.map((year) => <article key={year.id}><div><b>{year.nameEn}</b><small>Year of {universityName(year.universityId)}</small></div><button className="danger-action" onClick={() => window.confirm(`Delete "${year.nameEn}" and everything under it?`) && void act("deleteYear", { id: year.id })}>Delete</button></article>)}
-        {academic.terms.map((term) => <article key={term.id}><div><b>{term.nameEn}</b><small>Term of {yearName(term.yearId)}</small></div><button className="danger-action" onClick={() => window.confirm(`Delete "${term.nameEn}" and every subject under it?`) && void act("deleteTerm", { id: term.id })}>Delete</button></article>)}
-        {academic.subjects.map((subject) => <article key={subject.id}><div><b>{subject.nameEn}</b><small>Subject of {termName(subject.termId)}</small></div><button className="danger-action" onClick={() => window.confirm(`Delete "${subject.nameEn}"? Any course linked to it and any student lock on it will be removed too.`) && void act("deleteSubject", { id: subject.id })}>Delete</button></article>)}
+      <div className="tree-toolbar">
+        <input className="tree-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search anything in the tree…" />
+        <button className="outline-button" onClick={() => setForceOpen(true)}>Expand all</button>
+        <button className="outline-button" onClick={() => setForceOpen(false)}>Collapse all</button>
+      </div>
+      <div className="subject-picker academic-tree">
+        {[...academic.colleges].sort((a, b) => a.nameEn.localeCompare(b.nameEn)).map((college) => {
+          const universities = academic.universities.filter((university) => university.collegeId === college.id).sort((a, b) => a.nameEn.localeCompare(b.nameEn)).map((university) => ({
+            university,
+            years: academic.years.filter((year) => year.universityId === university.id).sort((a, b) => a.yearNumber - b.yearNumber).map((year) => ({
+              year,
+              terms: academic.terms.filter((term) => term.yearId === year.id).sort((a, b) => a.termNumber - b.termNumber).map((term) => ({ term, subjects: academic.subjects.filter((subject) => subject.termId === term.id) })),
+            })),
+          }));
+          const nodeMatches = (...names: string[]) => !q || names.some((name) => name.toLowerCase().includes(q));
+          const collegeMatches = nodeMatches(college.nameEn);
+          const anyMatch = collegeMatches || universities.some(({ university, years }) => nodeMatches(university.nameEn) || years.some(({ year, terms }) => nodeMatches(year.nameEn) || terms.some(({ term, subjects }) => nodeMatches(term.nameEn) || subjects.some((subject) => nodeMatches(subject.nameEn)))));
+          if (!anyMatch) return null;
+          return <details key={college.id} open={forceOpen ?? Boolean(q)}>
+            <summary>
+              {editingCollege?.id === college.id
+                ? <span className="tree-edit-row" onClick={(e) => e.preventDefault()}><input value={editingCollege.nameEn} onChange={(e) => setEditingCollege({ ...editingCollege, nameEn: e.target.value })} /><input value={editingCollege.nameAr} onChange={(e) => setEditingCollege({ ...editingCollege, nameAr: e.target.value })} /><button className="workspace-primary" onClick={() => void act("editCollege", editingCollege).then((ok) => ok && setEditingCollege(null))}>Save</button><button className="outline-button" onClick={() => setEditingCollege(null)}>Cancel</button></span>
+                : <span className="tree-node-row"><b>{college.nameEn}</b><span className="tree-node-actions"><button onClick={(e) => { e.preventDefault(); setEditingCollege({ id: college.id, nameEn: college.nameEn, nameAr: college.nameAr }); }}>Edit</button><button className="danger-action" onClick={(e) => { e.preventDefault(); window.confirm(`Delete "${college.nameEn}" and everything under it?`) && void act("deleteCollege", { id: college.id }); }}>Delete</button></span></span>}
+            </summary>
+            {universities.map(({ university, years }) => <details key={university.id} open={forceOpen ?? Boolean(q)}>
+              <summary>
+                {editingUniversity?.id === university.id
+                  ? <span className="tree-edit-row" onClick={(e) => e.preventDefault()}><input value={editingUniversity.nameEn} onChange={(e) => setEditingUniversity({ ...editingUniversity, nameEn: e.target.value })} /><input value={editingUniversity.nameAr} onChange={(e) => setEditingUniversity({ ...editingUniversity, nameAr: e.target.value })} /><button className="workspace-primary" onClick={() => void act("editUniversity", editingUniversity).then((ok) => ok && setEditingUniversity(null))}>Save</button><button className="outline-button" onClick={() => setEditingUniversity(null)}>Cancel</button></span>
+                  : <span className="tree-node-row"><b>{university.nameEn}</b><span className="tree-node-actions"><button onClick={(e) => { e.preventDefault(); setEditingUniversity({ id: university.id, nameEn: university.nameEn, nameAr: university.nameAr }); }}>Edit</button><button className="danger-action" onClick={(e) => { e.preventDefault(); window.confirm(`Delete "${university.nameEn}" and everything under it?`) && void act("deleteUniversity", { id: university.id }); }}>Delete</button></span></span>}
+              </summary>
+              {years.map(({ year, terms }) => <details key={year.id} open={forceOpen ?? Boolean(q)}>
+                <summary>
+                  {editingYear?.id === year.id
+                    ? <span className="tree-edit-row" onClick={(e) => e.preventDefault()}><input value={editingYear.nameEn} onChange={(e) => setEditingYear({ ...editingYear, nameEn: e.target.value })} /><input value={editingYear.nameAr} onChange={(e) => setEditingYear({ ...editingYear, nameAr: e.target.value })} /><input type="number" value={editingYear.yearNumber} onChange={(e) => setEditingYear({ ...editingYear, yearNumber: Number(e.target.value) })} /><button className="workspace-primary" onClick={() => void act("editYear", editingYear).then((ok) => ok && setEditingYear(null))}>Save</button><button className="outline-button" onClick={() => setEditingYear(null)}>Cancel</button></span>
+                    : <span className="tree-node-row"><b>{year.nameEn}</b><span className="tree-node-actions"><button onClick={(e) => { e.preventDefault(); setEditingYear({ id: year.id, nameEn: year.nameEn, nameAr: year.nameAr, yearNumber: year.yearNumber }); }}>Edit</button><button className="danger-action" onClick={(e) => { e.preventDefault(); window.confirm(`Delete "${year.nameEn}" and everything under it?`) && void act("deleteYear", { id: year.id }); }}>Delete</button></span></span>}
+                </summary>
+                {terms.map(({ term, subjects }) => <div key={term.id} className="subject-term-group">
+                  {editingTerm?.id === term.id
+                    ? <span className="tree-edit-row"><input value={editingTerm.nameEn} onChange={(e) => setEditingTerm({ ...editingTerm, nameEn: e.target.value })} /><input value={editingTerm.nameAr} onChange={(e) => setEditingTerm({ ...editingTerm, nameAr: e.target.value })} /><input type="number" value={editingTerm.termNumber} onChange={(e) => setEditingTerm({ ...editingTerm, termNumber: Number(e.target.value) })} /><button className="workspace-primary" onClick={() => void act("editTerm", editingTerm).then((ok) => ok && setEditingTerm(null))}>Save</button><button className="outline-button" onClick={() => setEditingTerm(null)}>Cancel</button></span>
+                    : <span className="tree-node-row"><b>{term.nameEn}</b><span className="tree-node-actions"><button onClick={() => setEditingTerm({ id: term.id, nameEn: term.nameEn, nameAr: term.nameAr, termNumber: term.termNumber })}>Edit</button><button className="danger-action" onClick={() => window.confirm(`Delete "${term.nameEn}" and every subject under it?`) && void act("deleteTerm", { id: term.id })}>Delete</button></span></span>}
+                  {subjects.map((subject) => editingSubject?.id === subject.id
+                    ? <span key={subject.id} className="tree-edit-row"><input value={editingSubject.nameEn} onChange={(e) => setEditingSubject({ ...editingSubject, nameEn: e.target.value })} /><input value={editingSubject.nameAr} onChange={(e) => setEditingSubject({ ...editingSubject, nameAr: e.target.value })} /><button className="workspace-primary" onClick={() => void act("editSubject", editingSubject).then((ok) => ok && setEditingSubject(null))}>Save</button><button className="outline-button" onClick={() => setEditingSubject(null)}>Cancel</button></span>
+                    : <span key={subject.id} className="tree-node-row subject-checkbox"><span>{subject.nameEn}</span><span className="tree-node-actions"><button onClick={() => setEditingSubject({ id: subject.id, nameEn: subject.nameEn, nameAr: subject.nameAr })}>Edit</button><button className="danger-action" onClick={() => window.confirm(`Delete "${subject.nameEn}"? Any course linked to it and any student lock on it will be removed too.`) && void act("deleteSubject", { id: subject.id })}>Delete</button></span></span>)}
+                </div>)}
+              </details>)}
+            </details>)}
+          </details>;
+        })}
         {!academic.colleges.length ? <EmptyState>Add your first college to start building the tree.</EmptyState> : null}
       </div>
     </section>

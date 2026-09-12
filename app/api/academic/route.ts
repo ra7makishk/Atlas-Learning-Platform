@@ -86,6 +86,27 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
 
+    if (action === "editYear") {
+      const id = Number(data.id), nameAr = clean(data.nameAr, 160), nameEn = clean(data.nameEn, 160), yearNumber = Number(data.yearNumber);
+      if (!Number.isInteger(id) || !nameAr || !nameEn || !Number.isInteger(yearNumber)) return Response.json({ error: "A year number and both names are required" }, { status: 400 });
+      await pool.query("UPDATE academic_years SET name_ar=$1,name_en=$2,year_number=$3 WHERE id=$4", [nameAr, nameEn, yearNumber, id]);
+      return Response.json({ ok: true });
+    }
+
+    if (action === "editTerm") {
+      const id = Number(data.id), nameAr = clean(data.nameAr, 160), nameEn = clean(data.nameEn, 160), termNumber = Number(data.termNumber);
+      if (!Number.isInteger(id) || !nameAr || !nameEn || !Number.isInteger(termNumber)) return Response.json({ error: "A term number and both names are required" }, { status: 400 });
+      await pool.query("UPDATE terms SET name_ar=$1,name_en=$2,term_number=$3 WHERE id=$4", [nameAr, nameEn, termNumber, id]);
+      return Response.json({ ok: true });
+    }
+
+    if (action === "editSubject") {
+      const id = Number(data.id), nameAr = clean(data.nameAr, 160), nameEn = clean(data.nameEn, 160);
+      if (!Number.isInteger(id) || !nameAr || !nameEn) return Response.json({ error: "Arabic and English names are required" }, { status: 400 });
+      await pool.query("UPDATE subjects SET name_ar=$1,name_en=$2 WHERE id=$3", [nameAr, nameEn, id]);
+      return Response.json({ ok: true });
+    }
+
     if (action === "deleteCollege" || action === "deleteUniversity" || action === "deleteYear" || action === "deleteTerm" || action === "deleteSubject") {
       const id = Number(data.id);
       if (!Number.isInteger(id)) return Response.json({ error: "Invalid id" }, { status: 400 });

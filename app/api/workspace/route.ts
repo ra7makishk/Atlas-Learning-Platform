@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 const courseFields = `SELECT c.id,c.slug,c.title_en AS "titleEn",c.title_ar AS "titleAr",c.category_en AS "categoryEn",c.category_ar AS "categoryAr",
 c.summary_en AS "summaryEn",c.summary_ar AS "summaryAr",c.instructor_name AS "instructorName",c.instructor_email AS "instructorEmail",
 c.whatsapp,c.price::float8 AS price,c.mode,c.image_url AS "imageUrl",c.level,c.duration,c.published,
-COALESCE((SELECT array_agg(cs.subject_id ORDER BY cs.subject_id) FROM course_subjects cs WHERE cs.course_id=c.id),'{}') AS "subjectIds"`;
+COALESCE((SELECT array_agg(cs.subject_id ORDER BY cs.subject_id) FROM course_subjects cs WHERE cs.course_id=c.id),'{}') AS "subjectIds",
+COALESCE((SELECT jsonb_agg(jsonb_build_object('collegeId',t.college_id,'universityId',t.university_id,'yearId',t.year_id)) FROM course_academic_targets t WHERE t.course_id=c.id),'[]') AS "targets"`;
 
 function validAssetUrl(value: string) {
   if (value.startsWith("/api/")) return true;
@@ -29,7 +30,8 @@ export async function GET() {
         ? await rows(`${courseFields} FROM courses c WHERE c.instructor_email=$1 ORDER BY c.id`, [user.email])
         : await rows(`${courseFields},e.payment_status AS "paymentStatus",e.status AS "enrollmentStatus",e.progress FROM courses c LEFT JOIN enrollments e ON e.course_id=c.id AND e.user_email=$1 WHERE c.published=TRUE
           AND NOT EXISTS (SELECT 1 FROM course_subjects cs JOIN subject_locks sl ON sl.subject_id=cs.subject_id AND sl.student_email=$1 AND sl.course_id<>c.id WHERE cs.course_id=c.id)
-          ORDER BY c.id`, [user.email]);
+          AND (e.id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM course_academic_targets t WHERE t.course_id=c.id) OR EXISTS (SELECT 1 FROM course_academic_targets t WHERE t.course_id=c.id AND t.college_id=$2 AND t.university_id=$3 AND t.year_id=$4))
+          ORDER BY c.id`, [user.email, user.collegeId, user.universityId, user.yearId]);
     const lessons = user.role === "student"
       ? await rows("SELECT DISTINCT l.id,l.course_id,l.title,l.kind,l.asset_url,l.duration,l.section_type,l.sort_order,l.published,l.created_at FROM lessons l JOIN enrollments e ON e.course_id=l.course_id JOIN access_codes a ON a.course_id=l.course_id AND a.student_email=e.user_email WHERE e.user_email=$1 AND e.payment_status='paid' AND e.status='active' AND l.published=TRUE AND a.status='redeemed' AND NOW() BETWEEN a.available_from AND a.available_until AND (a.plan_type='full_curriculum' OR l.section_type=a.section_type) AND (SELECT COUNT(*) FROM lessons l2 WHERE l2.course_id=l.course_id AND (a.plan_type='full_curriculum' OR l2.section_type=a.section_type) AND (l2.sort_order<l.sort_order OR (l2.sort_order=l.sort_order AND l2.id<=l.id)))<=a.section_limit ORDER BY l.course_id,l.sort_order,l.id", [user.email])
       : await rows("SELECT l.* FROM lessons l JOIN courses c ON c.id=l.course_id WHERE $1='admin' OR c.instructor_email=$2 ORDER BY l.course_id,l.sort_order,l.id", [user.role, user.email]);

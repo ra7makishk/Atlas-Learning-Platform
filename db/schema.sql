@@ -221,6 +221,32 @@ CREATE TABLE IF NOT EXISTS subject_locks (
   UNIQUE(student_email, subject_id)
 );
 
+CREATE TABLE IF NOT EXISTS course_academic_targets (
+  id BIGSERIAL PRIMARY KEY,
+  course_id BIGINT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  college_id BIGINT NOT NULL REFERENCES colleges(id) ON DELETE CASCADE,
+  university_id BIGINT NOT NULL REFERENCES universities(id) ON DELETE CASCADE,
+  year_id BIGINT NOT NULL REFERENCES academic_years(id) ON DELETE CASCADE,
+  UNIQUE(course_id, college_id, university_id, year_id)
+);
+
+CREATE INDEX IF NOT EXISTS course_academic_targets_course_idx ON course_academic_targets(course_id);
+CREATE INDEX IF NOT EXISTS course_academic_targets_year_idx ON course_academic_targets(year_id);
+
+CREATE TABLE IF NOT EXISTS announcements (
+  id BIGSERIAL PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'text',
+  title_en TEXT NOT NULL DEFAULT '',
+  title_ar TEXT NOT NULL DEFAULT '',
+  body_en TEXT NOT NULL DEFAULT '',
+  body_ar TEXT NOT NULL DEFAULT '',
+  media_url TEXT NOT NULL DEFAULT '',
+  link_url TEXT NOT NULL DEFAULT '',
+  published BOOLEAN NOT NULL DEFAULT TRUE,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS universities_college_idx ON universities(college_id);
 CREATE INDEX IF NOT EXISTS academic_years_university_idx ON academic_years(university_id);
 CREATE INDEX IF NOT EXISTS terms_year_idx ON terms(year_id);

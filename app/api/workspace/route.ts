@@ -1,14 +1,15 @@
 import { requireUser } from "../../../lib/auth";
 import { one, pool, rows, withTransaction } from "../../../lib/db";
 import { paymentDecision, type PaymentMethod } from "../../../lib/payments";
-import { apiError, clean } from "../../../lib/validation";
+import { apiError, clean, stageLevels } from "../../../lib/validation";
 
 export const dynamic = "force-dynamic";
 
 const courseFields = `SELECT c.id,c.slug,c.title_en AS "titleEn",c.title_ar AS "titleAr",c.category_en AS "categoryEn",c.category_ar AS "categoryAr",
 c.summary_en AS "summaryEn",c.summary_ar AS "summaryAr",c.instructor_name AS "instructorName",c.instructor_email AS "instructorEmail",
 c.whatsapp,c.price::float8 AS price,c.mode,c.image_url AS "imageUrl",c.level,c.duration,c.published,
-COALESCE((SELECT array_agg(cs.subject_id ORDER BY cs.subject_id) FROM course_subjects cs WHERE cs.course_id=c.id),'{}') AS "subjectIds"`;
+COALESCE((SELECT array_agg(cs.subject_id ORDER BY cs.subject_id) FROM course_subjects cs WHERE cs.course_id=c.id),'{}') AS "subjectIds",
+COALESCE((SELECT jsonb_agg(jsonb_build_object('collegeId',t.college_id,'universityId',t.university_id,'yearId',t.year_id)) FROM course_academic_targets t WHERE t.course_id=c.id),'[]') AS "targets"`;
 
 function validAssetUrl(value: string) {
   if (value.startsWith("/api/")) return true;
@@ -29,7 +30,8 @@ export async function GET() {
         ? await rows(`${courseFields} FROM courses c WHERE c.instructor_email=$1 ORDER BY c.id`, [user.email])
         : await rows(`${courseFields},e.payment_status AS "paymentStatus",e.status AS "enrollmentStatus",e.progress FROM courses c LEFT JOIN enrollments e ON e.course_id=c.id AND e.user_email=$1 WHERE c.published=TRUE
           AND NOT EXISTS (SELECT 1 FROM course_subjects cs JOIN subject_locks sl ON sl.subject_id=cs.subject_id AND sl.student_email=$1 AND sl.course_id<>c.id WHERE cs.course_id=c.id)
-          ORDER BY c.id`, [user.email]);
+          AND (e.id IS NOT NULL OR NOT EXISTS (SELECT 1 FROM course_academic_targets t WHERE t.course_id=c.id) OR EXISTS (SELECT 1 FROM course_academic_targets t WHERE t.course_id=c.id AND t.college_id=$2 AND t.university_id=$3 AND t.year_id=$4))
+          ORDER BY c.id`, [user.email, user.collegeId, user.universityId, user.yearId]);
     const lessons = user.role === "student"
       ? await rows("SELECT DISTINCT l.id,l.course_id,l.title,l.kind,l.asset_url,l.duration,l.section_type,l.sort_order,l.published,l.created_at FROM lessons l JOIN enrollments e ON e.course_id=l.course_id JOIN access_codes a ON a.course_id=l.course_id AND a.student_email=e.user_email WHERE e.user_email=$1 AND e.payment_status='paid' AND e.status='active' AND l.published=TRUE AND a.status='redeemed' AND NOW() BETWEEN a.available_from AND a.available_until AND (a.plan_type='full_curriculum' OR l.section_type=a.section_type) AND (SELECT COUNT(*) FROM lessons l2 WHERE l2.course_id=l.course_id AND (a.plan_type='full_curriculum' OR l2.section_type=a.section_type) AND (l2.sort_order<l.sort_order OR (l2.sort_order=l.sort_order AND l2.id<=l.id)))<=a.section_limit ORDER BY l.course_id,l.sort_order,l.id", [user.email])
       : await rows("SELECT l.* FROM lessons l JOIN courses c ON c.id=l.course_id WHERE $1='admin' OR c.instructor_email=$2 ORDER BY l.course_id,l.sort_order,l.id", [user.role, user.email]);
@@ -46,27 +48,7 @@ export async function GET() {
       rows(`SELECT id,year_id AS "yearId",term_number AS "termNumber",name_ar AS "nameAr",name_en AS "nameEn" FROM terms ORDER BY year_id,term_number`),
       rows(`SELECT id,term_id AS "termId",name_ar AS "nameAr",name_en AS "nameEn" FROM subjects ORDER BY term_id,id`),
     ]);
-    let academic = { colleges, universities, years, terms, subjects };
-    if (user.role === "instructor") {
-      // Scope the tree an instructor can browse/pick from to only the subjects their
-      // own courses already use — never another instructor's courses or subjects. If
-      // they have none yet (brand new, or all their courses are still unlinked), fall
-      // back to the full tree so they can make their very first pick.
-      const used = await rows<{ subject_id: number }>(`SELECT DISTINCT cs.subject_id FROM course_subjects cs JOIN courses c ON c.id=cs.course_id WHERE c.instructor_email=$1`, [user.email]);
-      const usedSubjectIds = new Set(used.map((row) => Number(row.subject_id)));
-      if (usedSubjectIds.size) {
-        const scopedSubjects = subjects.filter((row) => usedSubjectIds.has(Number(row.id)));
-        const termIds = new Set(scopedSubjects.map((row) => Number(row.termId)));
-        const scopedTerms = terms.filter((row) => termIds.has(Number(row.id)));
-        const yearIds = new Set(scopedTerms.map((row) => Number(row.yearId)));
-        const scopedYears = years.filter((row) => yearIds.has(Number(row.id)));
-        const universityIds = new Set(scopedYears.map((row) => Number(row.universityId)));
-        const scopedUniversities = universities.filter((row) => universityIds.has(Number(row.id)));
-        const collegeIds = new Set(scopedUniversities.map((row) => Number(row.collegeId)));
-        const scopedColleges = colleges.filter((row) => collegeIds.has(Number(row.id)));
-        academic = { colleges: scopedColleges, universities: scopedUniversities, years: scopedYears, terms: scopedTerms, subjects: scopedSubjects };
-      }
-    }
+    const academic = { colleges, universities, years, terms, subjects };
     const subjectLocks = user.role === "admin"
       ? await rows(`SELECT sl.id,sl.student_email AS "studentEmail",sl.subject_id AS "subjectId",sl.course_id AS "courseId",sl.locked_at AS "lockedAt",s.name_en AS "subjectNameEn",s.name_ar AS "subjectNameAr",c.title_en AS "courseTitle",c.instructor_name AS "instructorName" FROM subject_locks sl JOIN subjects s ON s.id=sl.subject_id JOIN courses c ON c.id=sl.course_id ORDER BY sl.id DESC`)
       : user.role === "student"
@@ -75,8 +57,8 @@ export async function GET() {
     let users: unknown[] = [], payments: unknown[] = [], deviceRequests: unknown[] = [], accessCodes: unknown[] = [];
     if (["admin", "instructor"].includes(user.role)) {
       users = user.role === "admin"
-        ? await rows(`SELECT u.id,u.email,u.name,u.role,u.status,u.phone,u.whatsapp,u.country,u.city,u.specialty,u.college_id AS "collegeId",u.university_id AS "universityId",u.year_id AS "yearId",uu.name_en AS "universityName",ay.name_en AS "yearName",u.trusted_device_id AS "trustedDeviceId",u.created_at AS "createdAt" FROM users u LEFT JOIN universities uu ON uu.id=u.university_id LEFT JOIN academic_years ay ON ay.id=u.year_id ORDER BY u.id DESC`)
-        : await rows(`SELECT DISTINCT u.id,u.email,u.name,u.role,u.status,u.phone,u.whatsapp,u.country,u.city,u.specialty,u.college_id AS "collegeId",u.university_id AS "universityId",u.year_id AS "yearId",uu.name_en AS "universityName",ay.name_en AS "yearName",u.created_at AS "createdAt" FROM users u LEFT JOIN universities uu ON uu.id=u.university_id LEFT JOIN academic_years ay ON ay.id=u.year_id JOIN enrollments e ON e.user_email=u.email JOIN courses c ON c.id=e.course_id WHERE c.instructor_email=$1 AND u.role='student' ORDER BY u.id DESC`, [user.email]);
+        ? await rows(`SELECT u.id,u.email,u.name,u.role,u.status,u.phone,u.whatsapp,u.country,u.city,u.specialty,u.stage,u.level,u.college_id AS "collegeId",u.university_id AS "universityId",u.year_id AS "yearId",u.trusted_device_id AS "trustedDeviceId",u.created_at AS "createdAt" FROM users u ORDER BY u.id DESC`)
+        : await rows(`SELECT DISTINCT u.id,u.email,u.name,u.role,u.status,u.phone,u.whatsapp,u.country,u.city,u.specialty,u.stage,u.level,u.college_id AS "collegeId",u.university_id AS "universityId",u.year_id AS "yearId",u.created_at AS "createdAt" FROM users u JOIN enrollments e ON e.user_email=u.email JOIN courses c ON c.id=e.course_id WHERE c.instructor_email=$1 AND u.role='student' ORDER BY u.id DESC`, [user.email]);
       payments = user.role === "admin"
         ? await rows(`SELECT p.*,p.amount::float8 AS amount,c.title_en AS "courseTitle",u.name AS "studentName" FROM payments p JOIN courses c ON c.id=p.course_id LEFT JOIN users u ON u.email=p.user_email ORDER BY p.id DESC`)
         : await rows(`SELECT p.*,p.amount::float8 AS amount,c.title_en AS "courseTitle",u.name AS "studentName" FROM payments p JOIN courses c ON c.id=p.course_id LEFT JOIN users u ON u.email=p.user_email WHERE c.instructor_email=$1 ORDER BY p.id DESC`, [user.email]);
@@ -99,26 +81,39 @@ export async function POST(request: Request) {
     const action = clean(body.action, 40);
     const data = body.data && typeof body.data === "object" ? body.data as Record<string, unknown> : {};
     const user = access.user;
+    // A self-registered instructor is still pending review at this point — they
+    // shouldn't be able to create/publish courses or do anything else until an
+    // admin approves them, same as a pending student can't access their course.
+    if (user.role === "instructor" && user.status !== "approved" && action !== "profile") {
+      return Response.json({ error: "Your instructor application is still under review" }, { status: 403 });
+    }
+
+    if (action === "onboarding") {
+      const choice = clean(data.choice, 10);
+      if (!["yes", "no"].includes(choice)) return Response.json({ error: "Choose yes or no" }, { status: 400 });
+      await pool.query("UPDATE users SET onboarding_choice=$1 WHERE email=$2", [choice, user.email]);
+      return Response.json({ ok: true });
+    }
 
     if (action === "profile") {
       const name = clean(data.name, 120), phone = clean(data.phone, 30);
-      const collegeId = Number(data.collegeId), universityId = Number(data.universityId), yearId = Number(data.yearId);
-      if (!name || !phone || !Number.isInteger(collegeId) || !Number.isInteger(universityId) || !Number.isInteger(yearId)) return Response.json({ error: "Name, phone, and your college/university/year are required" }, { status: 400 });
-      const university = await one<{ id: number; college_id: number }>("SELECT id,college_id FROM universities WHERE id=$1", [universityId]);
-      const year = await one<{ id: number; university_id: number }>("SELECT id,university_id FROM academic_years WHERE id=$1", [yearId]);
-      if (!university || university.college_id !== collegeId || !year || year.university_id !== universityId) return Response.json({ error: "Choose your college, university, and year in order" }, { status: 400 });
-      // An admin can edit a student's profile directly from the Students list; every
-      // other caller can only ever edit their own (targetEmail defaults to self).
-      let targetEmail = user.email;
-      if (data.email && user.role === "admin") {
-        targetEmail = clean(data.email, 160).toLowerCase();
-        if (!await one("SELECT email FROM users WHERE email=$1 AND role='student'", [targetEmail])) return Response.json({ error: "Student not found" }, { status: 404 });
+      const stage = clean(data.stage, 20);
+      if (!name || !phone || !Object.keys(stageLevels).includes(stage)) return Response.json({ error: "Name, phone, and your education stage are required" }, { status: 400 });
+
+      let collegeId: number | null = null, universityId: number | null = null, yearId: number | null = null, level = "";
+
+      if (stage === "university") {
+        collegeId = Number(data.collegeId); universityId = Number(data.universityId); yearId = Number(data.yearId);
+        if (!Number.isInteger(collegeId) || !Number.isInteger(universityId) || !Number.isInteger(yearId)) return Response.json({ error: "Choose your college, university, and year" }, { status: 400 });
+        const university = await one<{ id: number; college_id: string }>("SELECT id,college_id FROM universities WHERE id=$1", [universityId]);
+        const year = await one<{ id: number; university_id: string }>("SELECT id,university_id FROM academic_years WHERE id=$1", [yearId]);
+        if (!university || Number(university.college_id) !== collegeId || !year || Number(year.university_id) !== universityId) return Response.json({ error: "Choose your college, university, and year in order" }, { status: 400 });
+      } else if (stage === "high_school") {
+        level = clean(data.level, 30);
+        if (!stageLevels.high_school.includes(level)) return Response.json({ error: "Choose your secondary school grade" }, { status: 400 });
       }
-      // Only auto-clear a rejection/changes-requested status when students edit
-      // their own profile in response to it — an admin edit shouldn't silently
-      // flip someone's review status.
-      const statusClause = targetEmail === user.email ? ",status=CASE WHEN status IN ('rejected','needs_changes') THEN 'pending' ELSE status END" : "";
-      await pool.query(`UPDATE users SET name=$1,phone=$2,whatsapp=$3,country=$4,city=$5,specialty=$6,college_id=$7,university_id=$8,year_id=$9${statusClause},updated_at=NOW() WHERE email=$10`, [name, phone, clean(data.whatsapp, 30), clean(data.country, 80), clean(data.city, 80), clean(data.specialty, 160), collegeId, universityId, yearId, targetEmail]);
+
+      await pool.query(`UPDATE users SET name=$1,phone=$2,whatsapp=$3,country=$4,city=$5,specialty=$6,stage=$7,level=$8,college_id=$9,university_id=$10,year_id=$11,status=CASE WHEN status IN ('rejected','needs_changes') THEN 'pending' ELSE status END,updated_at=NOW() WHERE email=$12`, [name, phone, clean(data.whatsapp, 30), clean(data.country, 80), clean(data.city, 80), clean(data.specialty, 160), stage, level, collegeId, universityId, yearId, user.email]);
       return Response.json({ ok: true });
     }
 
@@ -126,7 +121,7 @@ export async function POST(request: Request) {
       if (!["admin", "instructor"].includes(user.role)) return Response.json({ error: "Reviewer access required" }, { status: 403 });
       const email = clean(data.email, 160).toLowerCase(), status = clean(data.status, 30);
       if (!email || !["approved", "rejected", "needs_changes"].includes(status)) return Response.json({ error: "Invalid review" }, { status: 400 });
-      await pool.query("UPDATE users SET status=$1,updated_at=NOW() WHERE email=$2 AND role='student'", [status, email]);
+      await pool.query("UPDATE users SET status=$1,updated_at=NOW() WHERE email=$2 AND role IN ('student','instructor')", [status, email]);
       await pool.query("INSERT INTO notifications (user_email,title,message) VALUES ($1,$2,$3)", [email, "Profile review updated", `Your student profile is now ${status.replace("_", " ")}.`]);
       return Response.json({ ok: true });
     }
@@ -266,6 +261,21 @@ if (action === "unlockSubject") {
       return Response.json({ ok: true }, { status: 201 });
     }
 
+    if (action === "editLesson") {
+      if (!["admin", "instructor"].includes(user.role)) return Response.json({ error: "Instructor access required" }, { status: 403 });
+      const id = Number(data.id);
+      const lesson = await one<{ id: number; course_id: number; instructor_email: string }>(`SELECT l.id,l.course_id,c.instructor_email FROM lessons l JOIN courses c ON c.id=l.course_id WHERE l.id=$1`, [id]);
+      if (!lesson || (user.role === "instructor" && lesson.instructor_email !== user.email)) return Response.json({ error: "Lesson access denied" }, { status: 403 });
+      const title = clean(data.title, 160), kind = clean(data.kind, 30) || "video", assetUrl = clean(data.assetUrl, 500), duration = clean(data.duration, 80);
+      if (!title || !["video", "live", "file"].includes(kind)) return Response.json({ error: "Valid lesson title and type are required" }, { status: 400 });
+      if (!assetUrl || !validAssetUrl(assetUrl)) return Response.json({ error: kind === "live" ? "Add a secure HTTPS meeting link" : "Upload a file or add a secure HTTPS media link" }, { status: 400 });
+      if (kind === "live" && !duration) return Response.json({ error: "Add the live session date and time" }, { status: 400 });
+      const sectionType = clean(data.sectionType, 40) || "full_curriculum";
+      if (!planTypes.includes(sectionType)) return Response.json({ error: "Invalid section type" }, { status: 400 });
+      await pool.query("UPDATE lessons SET title=$1,kind=$2,asset_url=$3,duration=$4,section_type=$5 WHERE id=$6", [title, kind, assetUrl, duration, sectionType, id]);
+      return Response.json({ ok: true });
+    }
+
     if (action === "deleteLesson" || action === "moveLesson") {
       if (!["admin", "instructor"].includes(user.role)) return Response.json({ error: "Instructor access required" }, { status: 403 });
       const id = Number(data.id);
@@ -286,6 +296,52 @@ if (action === "unlockSubject") {
         });
       }
       return Response.json({ ok: true });
+    }
+
+    if (action === "broadcastMessage") {
+      if (!["admin", "instructor"].includes(user.role)) return Response.json({ error: "Instructor access required" }, { status: 403 });
+      const scope = clean(data.scope, 20), bodyText = clean(data.body, 1500);
+      if (!bodyText) return Response.json({ error: "A message is required" }, { status: 400 });
+
+      let recipients: string[] = [];
+      let courseId: number | null = null;
+
+      if (scope === "all_students") {
+        recipients = user.role === "admin"
+          ? (await rows<{ email: string }>("SELECT email FROM users WHERE role='student'")).map((row) => row.email)
+          : (await rows<{ email: string }>(
+              "SELECT DISTINCT e.user_email AS email FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE e.payment_status='paid' AND e.status='active' AND c.instructor_email=$1",
+              [user.email],
+            )).map((row) => row.email);
+      } else if (scope === "course_students") {
+        courseId = Number(data.courseId);
+        if (!Number.isInteger(courseId)) return Response.json({ error: "Choose a course" }, { status: 400 });
+        const course = await one<{ instructor_email: string }>("SELECT instructor_email FROM courses WHERE id=$1", [courseId]);
+        if (!course || (user.role === "instructor" && course.instructor_email !== user.email)) return Response.json({ error: "Course access denied" }, { status: 403 });
+        recipients = (await rows<{ email: string }>("SELECT user_email AS email FROM enrollments WHERE course_id=$1 AND payment_status='paid' AND status='active'", [courseId])).map((row) => row.email);
+      } else if (scope === "all_instructors") {
+        if (user.role !== "admin") return Response.json({ error: "Administrator access required" }, { status: 403 });
+        recipients = (await rows<{ email: string }>("SELECT email FROM users WHERE role='instructor'")).map((row) => row.email);
+      } else if (scope === "specific") {
+        const receiverEmail = clean(data.receiverEmail, 160).toLowerCase();
+        if (!receiverEmail) return Response.json({ error: "Choose a recipient" }, { status: 400 });
+        if (user.role === "instructor") {
+          const enrollment = await one("SELECT id FROM enrollments e JOIN courses c ON c.id=e.course_id WHERE e.user_email=$1 AND c.instructor_email=$2 AND e.payment_status='paid' AND e.status='active'", [receiverEmail, user.email]);
+          if (!enrollment) return Response.json({ error: "Choose one of your own students" }, { status: 403 });
+        }
+        if (!await one("SELECT id FROM users WHERE email=$1", [receiverEmail])) return Response.json({ error: "Recipient account not found" }, { status: 404 });
+        recipients = [receiverEmail];
+      } else {
+        return Response.json({ error: "Choose who to message" }, { status: 400 });
+      }
+
+      recipients = Array.from(new Set(recipients)).filter((email) => email !== user.email);
+      if (!recipients.length) return Response.json({ error: "No matching recipients were found" }, { status: 404 });
+      for (const email of recipients) {
+        await pool.query("INSERT INTO messages (course_id,sender_email,receiver_email,body) VALUES ($1,$2,$3,$4)", [courseId, user.email, email, bodyText]);
+        await pool.query("INSERT INTO notifications (user_email,course_id,title,message) VALUES ($1,$2,$3,$4)", [email, courseId, "New message", `New message from ${user.name}.`]);
+      }
+      return Response.json({ ok: true, count: recipients.length }, { status: 201 });
     }
 
     if (action === "sendMessage") {

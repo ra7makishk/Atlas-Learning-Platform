@@ -246,7 +246,22 @@ CREATE TABLE IF NOT EXISTS announcements (
   link_url TEXT NOT NULL DEFAULT '',
   published BOOLEAN NOT NULL DEFAULT TRUE,
   sort_order INT NOT NULL DEFAULT 0,
+  show_on_landing BOOLEAN NOT NULL DEFAULT TRUE,
+  show_on_discover BOOLEAN NOT NULL DEFAULT FALSE,
+  audience TEXT NOT NULL DEFAULT 'all' CHECK (audience IN ('all','public','academic','course')),
+  college_id BIGINT REFERENCES colleges(id) ON DELETE SET NULL,
+  university_id BIGINT REFERENCES universities(id) ON DELETE SET NULL,
+  year_id BIGINT REFERENCES academic_years(id) ON DELETE SET NULL,
+  target_course_id BIGINT REFERENCES courses(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- The courses an announcement features/links to (checkboxes in the admin form).
+-- Separate from target_course_id above, which is who the announcement is shown to.
+CREATE TABLE IF NOT EXISTS announcement_courses (
+  announcement_id BIGINT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+  course_id BIGINT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  PRIMARY KEY (announcement_id, course_id)
 );
 
 CREATE INDEX IF NOT EXISTS universities_college_idx ON universities(college_id);

@@ -24,6 +24,18 @@ try {
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS university_id BIGINT REFERENCES universities(id) ON DELETE SET NULL");
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS year_id BIGINT REFERENCES academic_years(id) ON DELETE SET NULL");
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS term_id BIGINT REFERENCES terms(id) ON DELETE SET NULL");
+  await client.query("ALTER TABLE announcements ADD COLUMN IF NOT EXISTS show_on_landing BOOLEAN NOT NULL DEFAULT TRUE");
+  await client.query("ALTER TABLE announcements ADD COLUMN IF NOT EXISTS show_on_discover BOOLEAN NOT NULL DEFAULT FALSE");
+  await client.query("ALTER TABLE announcements ADD COLUMN IF NOT EXISTS audience TEXT NOT NULL DEFAULT 'all'");
+  await client.query("ALTER TABLE announcements ADD COLUMN IF NOT EXISTS college_id BIGINT REFERENCES colleges(id) ON DELETE SET NULL");
+  await client.query("ALTER TABLE announcements ADD COLUMN IF NOT EXISTS university_id BIGINT REFERENCES universities(id) ON DELETE SET NULL");
+  await client.query("ALTER TABLE announcements ADD COLUMN IF NOT EXISTS year_id BIGINT REFERENCES academic_years(id) ON DELETE SET NULL");
+  await client.query("ALTER TABLE announcements ADD COLUMN IF NOT EXISTS target_course_id BIGINT REFERENCES courses(id) ON DELETE SET NULL");
+  await client.query(`CREATE TABLE IF NOT EXISTS announcement_courses (
+    announcement_id BIGINT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+    course_id BIGINT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    PRIMARY KEY (announcement_id, course_id)
+  )`);
   const cleanupKey = "demo_catalog_removed_20260907";
   const existing = await client.query("SELECT value FROM app_settings WHERE key=$1", [cleanupKey]);
   if (!existing.rowCount) {

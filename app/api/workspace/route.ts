@@ -69,7 +69,19 @@ export async function GET() {
     } else {
       accessCodes = await rows(`SELECT a.*,c.title_en AS "courseTitle" FROM access_codes a JOIN courses c ON c.id=a.course_id WHERE a.student_email=$1 ORDER BY a.id DESC`, [user.email]);
     }
-    return Response.json({ user, courses, lessons, enrollments, notifications, messages, mediaAssets, users, payments, deviceRequests, accessCodes, subjectLocks, academic, demoPayments: String(process.env.PAYMENT_PROVIDER || "manual").toLowerCase() === "demo" });
+    let announcements: Record<string, unknown>[] = [];
+    if (user.role === "student") {
+      const enrolledCourseIds = (await rows<{ course_id: number }>("SELECT DISTINCT course_id FROM enrollments WHERE user_email=$1 AND payment_status='paid' AND status='active'", [user.email])).map((row) => row.course_id);
+      announcements = await rows(
+        `SELECT id,kind,title_en AS "titleEn",title_ar AS "titleAr",body_en AS "bodyEn",body_ar AS "bodyAr",media_url AS "mediaUrl",link_url AS "linkUrl",sort_order AS "sortOrder"
+         FROM announcements
+         WHERE published=TRUE AND show_on_discover=TRUE
+           AND (audience='all' OR (audience='academic' AND college_id=$1 AND university_id=$2 AND year_id=$3) OR (audience='course' AND target_course_id=ANY($4::bigint[])))
+         ORDER BY sort_order,id`,
+        [user.collegeId, user.universityId, user.yearId, enrolledCourseIds],
+      );
+    }
+    return Response.json({ user, courses, lessons, enrollments, notifications, messages, mediaAssets, users, payments, deviceRequests, accessCodes, subjectLocks, academic, announcements, demoPayments: String(process.env.PAYMENT_PROVIDER || "manual").toLowerCase() === "demo" });
   } catch (error) { return apiError(error, "Workspace GET error"); }
 }
 

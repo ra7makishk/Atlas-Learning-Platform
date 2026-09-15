@@ -271,6 +271,13 @@ span.subject-checkbox.tree-node-row { justify-content: space-between; }
 .pending-layout ol { margin: 35px 0 0; padding: 0; list-style: none; }
 .pending-layout li { padding: 13px 0; border-top: 1px solid #cbc8c0; color: #8e9095; font-size: 9px; }.pending-layout li::before { content: "○"; margin-inline-end: 10px; }.pending-layout li.done { color: var(--ink); }.pending-layout li.done::before { content: "●"; color: var(--blue); }
 .workspace-course-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 17px; }
+.checkbox-row, .checkbox-list { display: flex; flex-wrap: wrap; gap: 10px 18px; font: inherit; }
+.checkbox-list { max-height: 160px; overflow-y: auto; border: 1px solid #e6e4de; padding: 10px; }
+.checkbox-row label, .checkbox-list label { display: flex; align-items: center; gap: 6px; font-size: 9px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.discover-announcements { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.discover-announcement-card { background: #1c1c1e; color: #fff; padding: 16px; }
+.discover-announcement-card img, .discover-announcement-card video { width: 100%; max-height: 160px; object-fit: cover; margin-bottom: 10px; }
+.discover-announcement-card a { color: #9fe3c9; }
 .workspace-section-heading { max-width: 540px; color: #6c6e74; font-size: 11px; line-height: 1.7; margin-bottom: 24px; }
 .workspace-course-grid > article { background: #faf8f3; }
 .workspace-course-grid > article > img { width: 100%; height: 190px; object-fit: cover; }

@@ -27,10 +27,11 @@ type WorkspaceData = {
   subjectLocks: AnyRow[];
   academic: AcademicData;
   demoPayments: boolean;
+  announcements: AnyRow[];
 };
 
 const emptyAcademic: AcademicData = { colleges: [], universities: [], years: [], terms: [], subjects: [] };
-const emptyData: WorkspaceData = { user: {} as PlatformUser, courses: [], lessons: [], enrollments: [], notifications: [], messages: [], mediaAssets: [], users: [], payments: [], deviceRequests: [], accessCodes: [], subjectLocks: [], academic: emptyAcademic, demoPayments: false };
+const emptyData: WorkspaceData = { user: {} as PlatformUser, courses: [], lessons: [], enrollments: [], notifications: [], messages: [], mediaAssets: [], users: [], payments: [], deviceRequests: [], accessCodes: [], subjectLocks: [], academic: emptyAcademic, demoPayments: false, announcements: [] };
 
 const labels = {
   en: { overview: "Overview", courses: "Courses", studio: "Video & live", instructors: "Instructors", access: "Access codes", students: "Students", payments: "Payments", devices: "Devices", messages: "Messages", learning: "My learning", activate: "Activate code", discover: "Discover", notifications: "Notifications", profile: "Profile", protection: "Player demo", academic: "Academic structure", announcements: "Site announcements" },
@@ -234,7 +235,7 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
         {!busy && !instructorPending && active === "courses" && role !== "student" && <CourseManager courses={data.courses} saveCourse={saveCourse} manageCourse={manageCourse} saveSubjects={saveSubjects} saveTargets={saveTargets} academic={data.academic} role={role} />}
         {!busy && !instructorPending && active === "studio" && role !== "student" && <ContentStudio courses={data.courses} lessons={data.lessons} act={act} />}
         {!busy && active === "academic" && role === "admin" && <AcademicManager academic={data.academic} act={academicAction} />}
-        {!busy && active === "announcements" && role === "admin" && <AnnouncementManager />}
+        {!busy && active === "announcements" && role === "admin" && <AnnouncementManager academic={data.academic} courses={data.courses} />}
         {!busy && active === "instructors" && role === "admin" && <InstructorManager data={data} act={act} />}
         {!busy && active === "access" && role === "admin" && <AccessCodeManager data={data} act={act} />}
         {!busy && !instructorPending && active === "students" && role !== "student" && <StudentManager users={data.users} enrollments={data.enrollments} academic={data.academic} role={role} act={act} />}
@@ -243,7 +244,7 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
         {!busy && !instructorPending && active === "protection" && role !== "student" && <ProtectedPlayer name={data.user.name} email={data.user.email} />}
         {!busy && !needsOnboarding && active === "learning" && role === "student" && data.user.status === "approved" && <MyLearning data={data} />}
         {!busy && !needsOnboarding && active === "activate" && role === "student" && data.user.status === "approved" && <ActivateCode accessCodes={data.accessCodes} act={act} />}
-        {!busy && !needsOnboarding && active === "discover" && role === "student" && data.user.status === "approved" && <Discover courses={data.courses} demoPayments={data.demoPayments} act={act} />}
+        {!busy && !needsOnboarding && active === "discover" && role === "student" && data.user.status === "approved" && <Discover courses={data.courses} demoPayments={data.demoPayments} announcements={data.announcements} act={act} />}
         {!busy && !needsOnboarding && active === "notifications" && (role !== "student" || data.user.status === "approved") && <Notifications rows={data.notifications} act={act} />}
         {!busy && !needsOnboarding && active === "messages" && (role !== "student" || data.user.status === "approved") && <Messages data={data} act={act} />}
         {!busy && !needsOnboarding && active === "profile" && role === "student" && data.user.status === "approved" && <ProfileForm user={data.user} academic={data.academic} act={act} />}
@@ -608,13 +609,14 @@ function AcademicManager({ academic, act }: { academic: AcademicData; act: (acti
   </div>;
 }
 
-type Announcement = { id: number; kind: string; titleEn: string; titleAr: string; bodyEn: string; bodyAr: string; mediaUrl: string; linkUrl: string; published: boolean; sortOrder: number };
+type Announcement = { id: number; kind: string; titleEn: string; titleAr: string; bodyEn: string; bodyAr: string; mediaUrl: string; linkUrl: string; published: boolean; sortOrder: number; showOnLanding: boolean; showOnDiscover: boolean; audience: string; collegeId: number | null; universityId: number | null; yearId: number | null; targetCourseId: number | null; courseIds: number[] };
 
-function AnnouncementManager() {
+function AnnouncementManager({ academic, courses }: { academic: AcademicData; courses: AnyRow[] }) {
   const [items, setItems] = useState<Announcement[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ kind: "text", titleEn: "", titleAr: "", bodyEn: "", bodyAr: "", mediaUrl: "", linkUrl: "", sortOrder: "0" });
+  const emptyForm = { kind: "text", titleEn: "", titleAr: "", bodyEn: "", bodyAr: "", mediaUrl: "", linkUrl: "", sortOrder: "0", showOnLanding: true, showOnDiscover: false, audience: "all", collegeId: "", universityId: "", yearId: "", targetCourseId: "", courseIds: [] as number[] };
+  const [form, setForm] = useState(emptyForm);
 
   const load = async () => {
     setBusy(true);
@@ -638,7 +640,18 @@ function AnnouncementManager() {
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Action failed"); setBusy(false); return false; }
   };
 
-  const add = () => void act("save", { ...form, sortOrder: Number(form.sortOrder) || 0 }).then((ok) => ok && setForm({ kind: "text", titleEn: "", titleAr: "", bodyEn: "", bodyAr: "", mediaUrl: "", linkUrl: "", sortOrder: "0" }));
+  const universities = academic.universities.filter((row) => String(row.collegeId) === form.collegeId);
+  const years = academic.years.filter((row) => String(row.universityId) === form.universityId);
+  const toggleCourse = (id: number) => setForm((current) => ({ ...current, courseIds: current.courseIds.includes(id) ? current.courseIds.filter((row) => row !== id) : [...current.courseIds, id] }));
+
+  const add = () => void act("save", {
+    ...form,
+    sortOrder: Number(form.sortOrder) || 0,
+    collegeId: form.audience === "academic" ? Number(form.collegeId) : null,
+    universityId: form.audience === "academic" ? Number(form.universityId) : null,
+    yearId: form.audience === "academic" ? Number(form.yearId) : null,
+    targetCourseId: form.audience === "course" ? Number(form.targetCourseId) : null,
+  }).then((ok) => ok && setForm(emptyForm));
 
   return <div className="manager-grid">
     <section className="workspace-panel form-panel">
@@ -652,6 +665,24 @@ function AnnouncementManager() {
         {form.kind !== "text" && <label>{form.kind === "image" ? "Image URL" : "Video URL"}<input value={form.mediaUrl} onChange={(e) => setForm({ ...form, mediaUrl: e.target.value })} placeholder="https://..." /></label>}
         <label>Link (optional, opens when clicked)<input value={form.linkUrl} onChange={(e) => setForm({ ...form, linkUrl: e.target.value })} placeholder="https://..." /></label>
         <label>Order (lower shows first)<input type="number" value={form.sortOrder} onChange={(e) => setForm({ ...form, sortOrder: e.target.value })} /></label>
+
+        <label>Show in<div className="checkbox-row"><label><input type="checkbox" checked={form.showOnLanding} onChange={(e) => setForm({ ...form, showOnLanding: e.target.checked })} /> Landing page (Courses section)</label><label><input type="checkbox" checked={form.showOnDiscover} onChange={(e) => setForm({ ...form, showOnDiscover: e.target.checked })} /> Discover tab (student account)</label></div></label>
+
+        <label>Visible to<select value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value, collegeId: "", universityId: "", yearId: "", targetCourseId: "" })}>
+          <option value="all">Everyone (visitors and signed-in users)</option>
+          <option value="public">Visitors only (not signed in)</option>
+          <option value="academic">A specific college / university / year</option>
+          <option value="course">Students of a specific course</option>
+        </select></label>
+        {form.audience === "academic" && <>
+          <label>College<select value={form.collegeId} onChange={(e) => setForm({ ...form, collegeId: e.target.value, universityId: "", yearId: "" })}><option value="" disabled>Choose a college</option>{academic.colleges.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+          <label>University<select value={form.universityId} disabled={!form.collegeId} onChange={(e) => setForm({ ...form, universityId: e.target.value, yearId: "" })}><option value="" disabled>Choose a university</option>{universities.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+          <label>Year<select value={form.yearId} disabled={!form.universityId} onChange={(e) => setForm({ ...form, yearId: e.target.value })}><option value="" disabled>Choose a year</option>{years.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
+        </>}
+        {form.audience === "course" && <label>Course<select value={form.targetCourseId} onChange={(e) => setForm({ ...form, targetCourseId: e.target.value })}><option value="" disabled>Choose a course</option>{courses.map((course) => <option key={String(course.id)} value={String(course.id)}>{String(value(course, "titleEn", "title_en"))}</option>)}</select></label>}
+
+        <label>Feature courses (optional)<div className="checkbox-list">{courses.length ? courses.map((course) => <label key={String(course.id)}><input type="checkbox" checked={form.courseIds.includes(Number(course.id))} onChange={() => toggleCourse(Number(course.id))} /> {String(value(course, "titleEn", "title_en"))}</label>) : <small>No courses yet.</small>}</div></label>
+
         <button className="workspace-primary" disabled={busy || !form.titleEn || (form.kind !== "text" && !form.mediaUrl)} onClick={add}>Add announcement <span>↗</span></button>
       </div>
     </section>
@@ -659,7 +690,7 @@ function AnnouncementManager() {
       <div className="panel-heading"><div><p>CURRENT</p><h2>{items.length} announcements</h2></div></div>
       <div className="data-table">
         {items.map((item) => <article key={item.id}>
-          <div><b>{item.titleEn}</b><small>{item.kind}{item.published ? "" : " — hidden"}</small></div>
+          <div><b>{item.titleEn}</b><small>{item.kind} · {item.audience}{item.showOnLanding ? " · Landing" : ""}{item.showOnDiscover ? " · Discover" : ""}{item.published ? "" : " — hidden"}</small></div>
           <button className="outline-button" onClick={() => void act("publish", { id: item.id, published: !item.published })}>{item.published ? "Hide" : "Show"}</button>
           <button className="danger-action" onClick={() => window.confirm(`Delete "${item.titleEn}"?`) && void act("delete", { id: item.id })}>Delete</button>
         </article>)}
@@ -715,12 +746,17 @@ function ProfileForm({ user, academic, act, adminView, onClose }: { user: Platfo
     <button className="workspace-primary wide" type="submit">{adminView ? "Save changes" : "Submit for review"} <span>↗</span></button></form></section>;
 }
 
-function Discover({ courses, demoPayments, act }: { courses: AnyRow[]; demoPayments: boolean; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+function Discover({ courses, demoPayments, announcements, act }: { courses: AnyRow[]; demoPayments: boolean; announcements: AnyRow[]; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
   const [paying, setPaying] = useState<number | null>(null);
   const [method, setMethod] = useState("cash_transfer");
   const [reference, setReference] = useState("");
-  if (!courses.length) return <section className="workspace-panel"><div className="panel-heading"><div><p>COURSE CATALOG</p><h2>Discover 4Z Academy</h2></div></div><EmptyState>No courses are open for enrollment yet. Published courses will appear here automatically.</EmptyState></section>;
-  return <div><div className="workspace-section-heading"><p>Choose a course and its instructor. Access opens only after payment is confirmed.</p></div><div className="workspace-course-grid">{courses.map((course) => {
+  const banners = announcements.length ? <div className="discover-announcements">{announcements.map((item) => <article key={String(item.id)} className="discover-announcement-card">
+    {item.kind === "image" && item.mediaUrl ? <img src={String(item.mediaUrl)} alt="" /> : null}
+    {item.kind === "video" && item.mediaUrl ? <video src={String(item.mediaUrl)} controls /> : null}
+    <div><b>{String(item.titleEn)}</b>{item.bodyEn ? <p>{String(item.bodyEn)}</p> : null}{item.linkUrl ? <a href={String(item.linkUrl)} target="_blank" rel="noreferrer">Learn more ↗</a> : null}</div>
+  </article>)}</div> : null;
+  if (!courses.length) return <section className="workspace-panel"><div className="panel-heading"><div><p>COURSE CATALOG</p><h2>Discover 4Z Academy</h2></div></div>{banners}<EmptyState>No courses are open for enrollment yet. Published courses will appear here automatically.</EmptyState></section>;
+  return <div>{banners}<div className="workspace-section-heading"><p>Choose a course and its instructor. Access opens only after payment is confirmed.</p></div><div className="workspace-course-grid">{courses.map((course) => {
     const whatsapp = String(course.whatsapp || "").replace(/\D/g, "");
     const canSubmit = method === "test_card" || Boolean(reference.trim());
     return <article key={String(course.id)}><img src={String(value(course, "imageUrl", "image_url"))} alt="" /><div><small>{String(value(course, "categoryEn", "category_en"))} · {String(course.mode)}</small><h2>{String(value(course, "titleEn", "title_en"))}</h2><p>with <b>{String(value(course, "instructorName", "instructor_name"))}</b></p><div className="course-price"><strong>{Number(course.price).toLocaleString()} EGP</strong>{whatsapp.length >= 8 ? <a href={`https://wa.me/${whatsapp}`} target="_blank" rel="noreferrer">WhatsApp ↗</a> : null}</div>{course.paymentStatus === "paid" ? <span className="enrolled-chip">Enrolled</span> : paying === Number(course.id) ? <div className="payment-box"><select value={method} onChange={(event) => { setMethod(event.target.value); setReference(""); }}>{demoPayments ? <option value="test_card">Test card — local testing only</option> : null}<option value="visa">Visa / card — pending review</option><option value="wallet">Orange Cash / wallet</option><option value="cash_transfer">Cash transfer</option></select>{method !== "test_card" && <input value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Payment reference (required)" />}<button disabled={!canSubmit} onClick={() => void act("enroll", { courseId: course.id, method, reference }).then((ok) => { if (ok) { setPaying(null); setReference(""); } })}>Submit payment request</button></div> : <button className="workspace-primary" onClick={() => setPaying(Number(course.id))}>Enroll & pay <span>↗</span></button>}</div></article>;

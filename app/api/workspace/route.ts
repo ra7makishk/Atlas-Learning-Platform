@@ -57,8 +57,8 @@ export async function GET() {
     let users: unknown[] = [], payments: unknown[] = [], deviceRequests: unknown[] = [], accessCodes: unknown[] = [];
     if (["admin", "instructor"].includes(user.role)) {
       users = user.role === "admin"
-        ? await rows(`SELECT u.id,u.email,u.name,u.role,u.status,u.phone,u.whatsapp,u.country,u.city,u.specialty,u.stage,u.level,u.college_id AS "collegeId",u.university_id AS "universityId",u.year_id AS "yearId",u.trusted_device_id AS "trustedDeviceId",u.created_at AS "createdAt" FROM users u ORDER BY u.id DESC`)
-        : await rows(`SELECT DISTINCT u.id,u.email,u.name,u.role,u.status,u.phone,u.whatsapp,u.country,u.city,u.specialty,u.stage,u.level,u.college_id AS "collegeId",u.university_id AS "universityId",u.year_id AS "yearId",u.created_at AS "createdAt" FROM users u JOIN enrollments e ON e.user_email=u.email JOIN courses c ON c.id=e.course_id WHERE c.instructor_email=$1 AND u.role='student' ORDER BY u.id DESC`, [user.email]);
+        ? await rows(`SELECT u.id,u.email,u.name,u.role,u.status,u.phone,u.whatsapp,u.alt_phone AS "altPhone",u.guardian_phone AS "guardianPhone",u.country,u.city,u.specialty,u.stage,u.level,u.college_id AS "collegeId",u.university_id AS "universityId",u.year_id AS "yearId",u.trusted_device_id AS "trustedDeviceId",u.created_at AS "createdAt" FROM users u ORDER BY u.id DESC`)
+        : await rows(`SELECT DISTINCT u.id,u.email,u.name,u.role,u.status,u.phone,u.whatsapp,u.alt_phone AS "altPhone",u.guardian_phone AS "guardianPhone",u.country,u.city,u.specialty,u.stage,u.level,u.college_id AS "collegeId",u.university_id AS "universityId",u.year_id AS "yearId",u.created_at AS "createdAt" FROM users u JOIN enrollments e ON e.user_email=u.email JOIN courses c ON c.id=e.course_id WHERE c.instructor_email=$1 AND u.role='student' ORDER BY u.id DESC`, [user.email]);
       payments = user.role === "admin"
         ? await rows(`SELECT p.*,p.amount::float8 AS amount,c.title_en AS "courseTitle",u.name AS "studentName" FROM payments p JOIN courses c ON c.id=p.course_id LEFT JOIN users u ON u.email=p.user_email ORDER BY p.id DESC`)
         : await rows(`SELECT p.*,p.amount::float8 AS amount,c.title_en AS "courseTitle",u.name AS "studentName" FROM payments p JOIN courses c ON c.id=p.course_id LEFT JOIN users u ON u.email=p.user_email WHERE c.instructor_email=$1 ORDER BY p.id DESC`, [user.email]);
@@ -188,11 +188,37 @@ if (action === "redeemAccessCode") {
     );
     if (conflict) return Response.json({error:`You already have access to "${conflict.subject_name}" through another instructor (${conflict.course_title}). Ask an administrator to unlock it if this instructor changed.`},{status:409});
   }
+  const course = await one<{instructor_email:string;title_en:string}>("SELECT instructor_email,title_en FROM courses WHERE id=$1",[grant.course_id]);
   await withTransaction(async(client)=>{
     await client.query("UPDATE access_codes SET status='redeemed',student_email=$2,redeemed_at=NOW() WHERE id=$1",[grant.id,user.email]);
-    await client.query("INSERT INTO enrollments(user_email,course_id,payment_status,status) VALUES($1,$2,'paid','active') ON CONFLICT(user_email,course_id) DO UPDATE SET payment_status='paid',status='active'",[user.email,grant.course_id]);
+    // No account-level approval gate anymore — the code itself proves payment/access.
+    // What content-access actually checks (files/[id]/route.ts, the lessons query
+    // above) is status='active', so 'awaiting_review' here already blocks playback
+    // on its own until the course's own instructor calls reviewEnrollment below.
+    await client.query("INSERT INTO enrollments(user_email,course_id,payment_status,status) VALUES($1,$2,'paid','awaiting_review') ON CONFLICT(user_email,course_id) DO UPDATE SET payment_status='paid',status='awaiting_review'",[user.email,grant.course_id]);
     for (const subjectId of subjectIds) await client.query("INSERT INTO subject_locks(student_email,subject_id,course_id) VALUES($1,$2,$3) ON CONFLICT(student_email,subject_id) DO NOTHING",[user.email,subjectId,grant.course_id]);
-    await client.query("INSERT INTO notifications(user_email,course_id,title,message) VALUES($1,$2,$3,$4)",[user.email,grant.course_id,"Course access activated","Your personal course access is now active."]);
+    await client.query("INSERT INTO notifications(user_email,course_id,title,message) VALUES($1,$2,$3,$4)",[user.email,grant.course_id,"Code activated — awaiting review","Your instructor will review your profile before you can watch this course."]);
+    if (course?.instructor_email) await client.query("INSERT INTO notifications(user_email,course_id,title,message) VALUES($1,$2,$3,$4)",[course.instructor_email,grant.course_id,"New student awaiting review",`${user.name} redeemed a code for ${course.title_en} and is waiting for your review.`]);
+  });
+  return Response.json({ok:true});
+}
+
+if (action === "reviewEnrollment") {
+  // The per-course approval a redeemed access code now waits on: the course's own
+  // instructor (or an admin) checks the student's profile and either unlocks the
+  // content (status='active') or turns them away (status='rejected', and the
+  // subject lock is freed so they can try a different instructor for the subject).
+  if (!["admin","instructor"].includes(user.role)) return Response.json({error:"Reviewer access required"},{status:403});
+  const studentEmail = clean(data.studentEmail,160).toLowerCase(), courseId = Number(data.courseId), decision = clean(data.decision,20);
+  if (!studentEmail || !Number.isInteger(courseId) || !["approved","rejected"].includes(decision)) return Response.json({error:"Invalid review"},{status:400});
+  const course = await one<{instructor_email:string;title_en:string}>("SELECT instructor_email,title_en FROM courses WHERE id=$1",[courseId]);
+  if (!course || (user.role==="instructor" && course.instructor_email!==user.email)) return Response.json({error:"You cannot review students for this course"},{status:403});
+  const enrollment = await one("SELECT id FROM enrollments WHERE user_email=$1 AND course_id=$2 AND status='awaiting_review'",[studentEmail,courseId]);
+  if (!enrollment) return Response.json({error:"No pending review found for this student and course"},{status:404});
+  await withTransaction(async(client)=>{
+    await client.query("UPDATE enrollments SET status=$1 WHERE user_email=$2 AND course_id=$3",[decision==="approved"?"active":"rejected",studentEmail,courseId]);
+    if (decision==="rejected") await client.query("DELETE FROM subject_locks WHERE student_email=$1 AND course_id=$2",[studentEmail,courseId]);
+    await client.query("INSERT INTO notifications(user_email,course_id,title,message) VALUES($1,$2,$3,$4)",[studentEmail,courseId,decision==="approved"?"Course access approved":"Course access declined",decision==="approved"?`You can now watch ${course.title_en}.`:`Your access request for ${course.title_en} was declined. Contact the instructor for details.`]);
   });
   return Response.json({ok:true});
 }

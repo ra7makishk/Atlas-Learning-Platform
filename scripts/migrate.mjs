@@ -36,6 +36,17 @@ try {
     course_id BIGINT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     PRIMARY KEY (announcement_id, course_id)
   )`);
+  // Students no longer need an account-level approval before they can log in and
+  // redeem a code — that gate moved to a per-enrollment instructor review (see
+  // reviewEnrollment in app/api/workspace/route.ts). Anyone stuck 'pending' under
+  // the old flow is carried over as approved so they aren't locked out by a rule
+  // that no longer applies to them.
+  const approvalMigrationKey = "students_no_longer_need_account_approval_20260915";
+  const approvalDone = await client.query("SELECT value FROM app_settings WHERE key=$1", [approvalMigrationKey]);
+  if (!approvalDone.rowCount) {
+    await client.query("UPDATE users SET status='approved' WHERE role='student' AND status IN ('pending','needs_changes')");
+    await client.query("INSERT INTO app_settings (key,value) VALUES ($1,'yes')", [approvalMigrationKey]);
+  }
   const cleanupKey = "demo_catalog_removed_20260907";
   const existing = await client.query("SELECT value FROM app_settings WHERE key=$1", [cleanupKey]);
   if (!existing.rowCount) {

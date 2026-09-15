@@ -34,8 +34,8 @@ const emptyAcademic: AcademicData = { colleges: [], universities: [], years: [],
 const emptyData: WorkspaceData = { user: {} as PlatformUser, courses: [], lessons: [], enrollments: [], notifications: [], messages: [], mediaAssets: [], users: [], payments: [], deviceRequests: [], accessCodes: [], subjectLocks: [], academic: emptyAcademic, demoPayments: false, announcements: [] };
 
 const labels = {
-  en: { overview: "Overview", courses: "Courses", studio: "Video & live", instructors: "Instructors", access: "Access codes", students: "Students", payments: "Payments", devices: "Devices", messages: "Messages", learning: "My learning", activate: "Activate code", discover: "Discover", notifications: "Notifications", profile: "Profile", protection: "Player demo", academic: "Academic structure", announcements: "Site announcements" },
-  ar: { overview: "نظرة عامة", courses: "الكورسات", studio: "الفيديو والبث", instructors: "المدرسين", access: "أكواد الاشتراك", students: "الطلاب", payments: "المدفوعات", devices: "الأجهزة", messages: "الرسائل", learning: "تعليمي", activate: "تفعيل كود", discover: "استكشف", notifications: "الإشعارات", profile: "البيانات", protection: "مشغل الحماية", academic: "Academic structure", announcements: "إعلانات الموقع" },
+  en: { overview: "Overview", courses: "Courses", studio: "Video & live", instructors: "Instructors", access: "Access codes", students: "Students", payments: "Payments", devices: "Devices", messages: "Messages", learning: "My learning", activate: "Activate code", discover: "Discover", notifications: "Notifications", profile: "Profile", protection: "Player demo", academic: "Academic structure", announcements: "Site announcements", requests: "Access requests" },
+  ar: { overview: "نظرة عامة", courses: "الكورسات", studio: "الفيديو والبث", instructors: "المدرسين", access: "أكواد الاشتراك", students: "الطلاب", payments: "المدفوعات", devices: "الأجهزة", messages: "الرسائل", learning: "تعليمي", activate: "تفعيل كود", discover: "استكشف", notifications: "الإشعارات", profile: "البيانات", protection: "مشغل الحماية", academic: "Academic structure", announcements: "إعلانات الموقع", requests: "Access requests" },
 };
 const planLabels: Record<string,string> = { full_curriculum:"Full curriculum · منهج كامل", mid_review:"Midterm review · مراجعة الميد", before_mid:"Before midterm · قبل الميد", after_mid:"After midterm · بعد الميد", final_review:"Final review · مراجعة فاينل" };
 
@@ -205,8 +205,8 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
   };
 
   const managerNav = role === "admin"
-    ? [["overview", t.overview], ["courses", t.courses], ["studio", t.studio], ["academic", t.academic], ["announcements", t.announcements], ["instructors", t.instructors], ["access", t.access], ["students", t.students], ["payments", t.payments], ["devices", t.devices], ["notifications", t.notifications], ["messages", t.messages], ["protection", t.protection]]
-    : [["overview", t.overview], ["courses", t.courses], ["studio", t.studio], ["students", t.students], ["notifications", t.notifications], ["messages", t.messages], ["protection", t.protection]];
+    ? [["overview", t.overview], ["courses", t.courses], ["studio", t.studio], ["academic", t.academic], ["announcements", t.announcements], ["instructors", t.instructors], ["access", t.access], ["requests", t.requests], ["students", t.students], ["payments", t.payments], ["devices", t.devices], ["notifications", t.notifications], ["messages", t.messages], ["protection", t.protection]]
+    : [["overview", t.overview], ["courses", t.courses], ["studio", t.studio], ["requests", t.requests], ["students", t.students], ["notifications", t.notifications], ["messages", t.messages], ["protection", t.protection]];
   const studentNav = [["learning", t.learning], ["activate", t.activate], ["discover", t.discover], ["notifications", t.notifications], ["messages", t.messages], ["profile", t.profile]];
   const nav = role === "student" ? studentNav : managerNav;
 
@@ -214,7 +214,7 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
     <main className="workspace-shell">
       <aside className="workspace-sidebar">
         <Link className="workspace-brand" href="/"><img src="/assets/4z-academy-logo.png" alt="" /><b>4Z ACADEMY</b><small>LEARNING PLATFORM</small></Link>
-        <nav>{nav.map(([id, label], index) => <button key={id} className={active === id ? "active" : ""} onClick={() => setActive(id)}><i>{String(index + 1).padStart(2, "0")}</i>{label}{id === "notifications" && data.notifications.some((row) => !row.read) ? <em>{data.notifications.filter((row) => !row.read).length}</em> : null}</button>)}</nav>
+        <nav>{nav.map(([id, label], index) => <button key={id} className={active === id ? "active" : ""} onClick={() => setActive(id)}><i>{String(index + 1).padStart(2, "0")}</i>{label}{id === "notifications" && data.notifications.some((row) => !row.read) ? <em>{data.notifications.filter((row) => !row.read).length}</em> : null}{id === "requests" && data.enrollments.some((row) => row.status === "awaiting_review") ? <em>{data.enrollments.filter((row) => row.status === "awaiting_review").length}</em> : null}</button>)}</nav>
         <div className="workspace-profile"><span>{data.user?.name?.split(" ").map((part) => part[0]).slice(0, 2).join("") || "A"}</span><div><b>{data.user?.name}</b><small>{role} · {data.user?.status}</small></div></div>
       </aside>
 
@@ -239,6 +239,7 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
         {!busy && active === "instructors" && role === "admin" && <InstructorManager data={data} act={act} />}
         {!busy && active === "access" && role === "admin" && <AccessCodeManager data={data} act={act} />}
         {!busy && !instructorPending && active === "students" && role !== "student" && <StudentManager users={data.users} enrollments={data.enrollments} academic={data.academic} role={role} act={act} />}
+        {!busy && !instructorPending && active === "requests" && role !== "student" && <EnrollmentRequests enrollments={data.enrollments} users={data.users} act={act} />}
         {!busy && active === "payments" && role === "admin" && <PaymentManager payments={data.payments} act={act} />}
         {!busy && active === "devices" && role === "admin" && <DeviceManager rows={data.deviceRequests} act={act} />}
         {!busy && !instructorPending && active === "protection" && role !== "student" && <ProtectedPlayer name={data.user.name} email={data.user.email} />}
@@ -486,6 +487,26 @@ function StudentManager({ users, enrollments, academic, role, act }: { users: An
   };
   return <section className="workspace-panel"><div className="panel-heading"><div><p>APPLICATION REVIEW</p><h2>Student profiles</h2></div><span className="status-chip">{students.filter((user) => user.status === "pending").length} pending</span></div>{students.length ? <div className="data-table student-table">{students.map((student) => <article key={String(student.email)}><div className="student-avatar">{String(student.name || student.email).slice(0, 2).toUpperCase()}</div><div><button type="button" className="student-name-link" onClick={() => setViewing(student)}>{String(student.name)}</button><small>{String(student.email)}</small></div><div><b>{String(student.phone || "No phone")}</b><small>{String(student.city || "City not added")} · {String(student.country || "Country not added")}</small></div><div><b>{placement(student)}</b><small>{enrollments.filter((row) => row.user_email === student.email).length} enrollments</small></div><span className={`review-status ${String(student.status)}`}>{String(student.status)}</span><div className="row-actions"><button onClick={() => void act("reviewUser", { email: student.email, status: "approved" })}>Approve</button><button onClick={() => void act("reviewUser", { email: student.email, status: "needs_changes" })}>Changes</button></div></article>)}</div> : <EmptyState>New student applications will appear here.</EmptyState>}
     {viewing && <div className="profile-viewer-overlay" onClick={() => setViewing(null)}><div className="profile-viewer-panel" onClick={(event) => event.stopPropagation()}><button type="button" className="profile-viewer-close" onClick={() => setViewing(null)}>✕ Close</button><ProfileForm user={viewing as unknown as PlatformUser} academic={academic} act={act} adminView onClose={() => setViewing(null)} /></div></div>}
+  </section>;
+}
+
+// A student's access code is accepted immediately, but they can't watch anything
+// until the course's own instructor (or an admin) clears their profile here — this
+// is the per-course review that replaced the old account-wide approval gate.
+function EnrollmentRequests({ enrollments, users, act }: { enrollments: AnyRow[]; users: AnyRow[]; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+  const pending = enrollments.filter((row) => row.status === "awaiting_review");
+  const profile = (email: string) => users.find((row) => row.email === email);
+  return <section className="workspace-panel"><div className="panel-heading"><div><p>PER-COURSE REVIEW</p><h2>Students waiting on a course</h2></div><span className="status-chip">{pending.length} waiting</span></div>
+    {pending.length ? <div className="data-table student-table">{pending.map((row) => {
+      const student = profile(String(row.user_email));
+      return <article key={`${row.user_email}-${row.course_id}`}>
+        <div className="student-avatar">{String(row.studentName || row.user_email).slice(0, 2).toUpperCase()}</div>
+        <div><b>{String(row.studentName || row.user_email)}</b><small>{String(row.user_email)}</small></div>
+        <div><b>{String(student?.phone || "No phone")}</b><small>Guardian: {String(student?.guardianPhone || "Not provided")}</small></div>
+        <div><b>{String(row.courseTitle)}</b><small>Redeemed {String(row.created_at)}</small></div>
+        <div className="row-actions"><button onClick={() => void act("reviewEnrollment", { studentEmail: row.user_email, courseId: row.course_id, decision: "approved" })}>Approve</button><button className="danger-action" onClick={() => void act("reviewEnrollment", { studentEmail: row.user_email, courseId: row.course_id, decision: "rejected" })}>Reject</button></div>
+      </article>;
+    })}</div> : <EmptyState>No student is waiting on a course review right now.</EmptyState>}
   </section>;
 }
 
@@ -765,6 +786,7 @@ function Discover({ courses, demoPayments, announcements, act }: { courses: AnyR
 
 function MyLearning({ data }: { data: WorkspaceData }) {
   const active = data.courses.filter((course) => course.paymentStatus === "paid" && course.enrollmentStatus === "active");
+  const waiting = data.courses.filter((course) => course.enrollmentStatus === "awaiting_review");
   const [selected, setSelected] = useState<number | null>(active[0] ? Number(active[0].id) : null);
   const chosen = active.find((course) => Number(course.id) === selected);
   const lessons = data.lessons.filter((lesson) => Number(lesson.course_id) === selected);
@@ -773,7 +795,9 @@ function MyLearning({ data }: { data: WorkspaceData }) {
   const source = String(opened?.asset_url || "");
   const asset = data.mediaAssets.find((row) => String(row.url) === source);
   const inferredMime = String(asset?.mimeType || (source.match(/\.pdf(?:$|\?)/i) ? "application/pdf" : source.match(/\.(png|jpe?g|gif|webp)(?:$|\?)/i) ? "image/*" : opened?.kind === "video" ? "video/*" : ""));
-  return active.length ? <div className="learning-layout"><aside>{active.map((course) => <button key={String(course.id)} className={selected === Number(course.id) ? "active" : ""} onClick={() => { setSelected(Number(course.id)); setLessonId(null); }}><img src={String(value(course, "imageUrl", "image_url"))} alt="" /><span><b>{String(value(course, "titleEn", "title_en"))}</b><small>{Number(course.progress || 0)}% complete</small></span></button>)}</aside><section>{chosen && <><p className="micro-label">PROTECTED COURSE ROOM</p><h2>{String(value(chosen, "titleEn", "title_en"))}</h2><LearningViewer lesson={opened} source={source} mimeType={inferredMime} name={data.user.name} email={data.user.email} /><div className="lesson-list">{lessons.map((lesson, index) => <article className={Number(opened?.id) === Number(lesson.id) ? "active" : ""} key={String(lesson.id)}><span>{String(index + 1).padStart(2, "0")}</span><div><b>{String(lesson.title)}</b><small>{String(lesson.kind)} · {String(lesson.duration || "View in platform")}</small></div>{lesson.asset_url ? <button onClick={() => setLessonId(Number(lesson.id))}>{lesson.kind === "file" ? "Open" : lesson.kind === "live" ? "Details" : "Play"}</button> : <button disabled>Coming soon</button>}</article>)}</div></>}</section></div> : <EmptyState>Your paid courses will appear here. Open Discover to choose your first course.</EmptyState>;
+  const waitingRoom = waiting.length ? <section className="workspace-panel waiting-room"><div className="panel-heading"><div><p>AWAITING REVIEW</p><h2>{waiting.length} course{waiting.length > 1 ? "s" : ""} waiting on the instructor</h2></div></div><p>Your access code was accepted — the instructor for each course below still needs to review your profile before you can start watching. You&apos;ll get a notification the moment it&apos;s approved.</p><div className="dashboard-course-list">{waiting.map((course) => <article key={String(course.id)}><img src={String(value(course, "imageUrl", "image_url"))} alt="" /><div><small>{String(value(course, "instructorName", "instructor_name"))}</small><h3>{String(value(course, "titleEn", "title_en"))}</h3><p>Waiting for instructor review</p></div></article>)}</div></section> : null;
+  if (!active.length) return <>{waitingRoom}<EmptyState>Your paid courses will appear here. Open Discover to choose your first course.</EmptyState></>;
+  return <>{waitingRoom}<div className="learning-layout"><aside>{active.map((course) => <button key={String(course.id)} className={selected === Number(course.id) ? "active" : ""} onClick={() => { setSelected(Number(course.id)); setLessonId(null); }}><img src={String(value(course, "imageUrl", "image_url"))} alt="" /><span><b>{String(value(course, "titleEn", "title_en"))}</b><small>{Number(course.progress || 0)}% complete</small></span></button>)}</aside><section>{chosen && <><p className="micro-label">PROTECTED COURSE ROOM</p><h2>{String(value(chosen, "titleEn", "title_en"))}</h2><LearningViewer lesson={opened} source={source} mimeType={inferredMime} name={data.user.name} email={data.user.email} /><div className="lesson-list">{lessons.map((lesson, index) => <article className={Number(opened?.id) === Number(lesson.id) ? "active" : ""} key={String(lesson.id)}><span>{String(index + 1).padStart(2, "0")}</span><div><b>{String(lesson.title)}</b><small>{String(lesson.kind)} · {String(lesson.duration || "View in platform")}</small></div>{lesson.asset_url ? <button onClick={() => setLessonId(Number(lesson.id))}>{lesson.kind === "file" ? "Open" : lesson.kind === "live" ? "Details" : "Play"}</button> : <button disabled>Coming soon</button>}</article>)}</div></>}</section></div></>;
 }
 
 function LearningViewer({ lesson, source, mimeType, name, email }: { lesson?: AnyRow; source: string; mimeType: string; name: string; email: string }) {

@@ -50,10 +50,18 @@ export async function POST(request: Request) {
     if (exists) return Response.json({ error: "An account already exists for this email" }, { status: 409 });
     const passwordHash = await bcrypt.hash(password, 12);
     const deviceId = await getOrCreateDeviceId();
+    // Students no longer wait on an account-level approval — their status is
+    // 'approved' from the moment they register. What actually gates their access
+    // to any one course is the per-enrollment review the course's own instructor
+    // does after the student redeems that course's access code (see redeemAccessCode
+    // and reviewEnrollment in app/api/workspace/route.ts). Instructors still start
+    // 'pending' — an admin has to approve the instructor account itself before it
+    // can create/publish courses, which is a separate, unrelated check.
+    const initialStatus = role === "student" ? "approved" : "pending";
     const user = await one<{ id: number; email: string; role: PlatformRole }>(
       `INSERT INTO users (email,password_hash,name,phone,whatsapp,alt_phone,guardian_phone,city,stage,level,college_id,university_id,year_id,role,status,trusted_device_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pending',$15) RETURNING id,email,role`,
-      [email, passwordHash, name, phone, clean(body.whatsapp, 30), clean(body.altPhone, 30), clean(body.guardianPhone, 30), clean(body.city, 80), stageValue, level, collegeId, universityId, yearId, role, deviceId],
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id,email,role`,
+      [email, passwordHash, name, phone, clean(body.whatsapp, 30), clean(body.altPhone, 30), clean(body.guardianPhone, 30), clean(body.city, 80), stageValue, level, collegeId, universityId, yearId, role, initialStatus, deviceId],
     );
     if (!user) throw new Error("Account could not be created");
     await createSession(user, deviceId);

@@ -15,6 +15,12 @@ try {
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_choice TEXT NOT NULL DEFAULT ''");
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS alt_phone TEXT NOT NULL DEFAULT ''");
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS guardian_phone TEXT NOT NULL DEFAULT ''");
+  // Timestamp of when the student explicitly agreed to the single-device sign-in
+  // notice at registration (see the "deviceConsent" checkbox in app/auth-form.tsx).
+  // NULL for any account created before this checkbox existed — the device lock
+  // itself (lib/auth.ts) still applies to them either way, this is just the record
+  // of consent for accounts created after it was added.
+  await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS device_consent_at TIMESTAMPTZ");
   await client.query("ALTER TABLE messages ALTER COLUMN course_id DROP NOT NULL");
   await client.query("ALTER TABLE access_codes ALTER COLUMN student_email DROP NOT NULL");
   // Student's current academic placement (college/university/year/term). Informational

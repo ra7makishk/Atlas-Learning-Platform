@@ -395,6 +395,10 @@ function ContentStudio({ courses, lessons, act }: { courses: AnyRow[]; lessons: 
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadInfo, setUploadInfo] = useState("");
+  // Lessons staged locally before they're all submitted together in one request —
+  // lets an instructor line up an entire section's material before committing it.
+  const [queue, setQueue] = useState<{ title: string; kind: string; assetUrl: string; duration: string; sectionType: string }[]>([]);
+  const [submittingQueue, setSubmittingQueue] = useState(false);
 
   const selectedCourse = courses.find((course) => Number(course.id) === courseId);
   const selectedLessons = lessons.filter((lesson) => Number(lesson.course_id) === courseId);
@@ -411,6 +415,30 @@ function ContentStudio({ courses, lessons, act }: { courses: AnyRow[]; lessons: 
     setDuration(String(lesson.duration || ""));
     setSectionType(String(value(lesson, "sectionType", "section_type") || "full_curriculum"));
     setUploadInfo(""); setUploadProgress(0);
+  };
+
+  const queueLesson = () => {
+    if (!canPublish) return;
+    setQueue((current) => [...current, { title, kind, assetUrl, duration, sectionType }]);
+    resetForm();
+  };
+
+  const removeQueued = (index: number) => setQueue((current) => current.filter((_, position) => position !== index));
+
+  const submitQueue = async () => {
+    if (!queue.length) return;
+    setSubmittingQueue(true);
+    const ok = await act("addLessons", { courseId, lessons: queue });
+    setSubmittingQueue(false);
+    if (ok) setQueue([]);
+  };
+
+  // Editing overwrites material students may already be mid-lesson on, so this asks
+  // for one explicit confirmation before the change goes live — unlike adding new
+  // material, which is always additive and doesn't need one.
+  const saveEdit = () => {
+    if (!window.confirm("Save these changes? Students currently viewing this lesson will see the update immediately.")) return;
+    void act("editLesson", { id: editingLessonId, title, kind, assetUrl, duration, sectionType }).then((ok) => { if (ok) resetForm(); });
   };
 
   const chooseKind = (nextKind: string) => {
@@ -455,10 +483,12 @@ function ContentStudio({ courses, lessons, act }: { courses: AnyRow[]; lessons: 
         {assetUrl && !secureAsset ? <p className="field-warning">Use an HTTPS link. Uploaded files are accepted automatically.</p> : null}
         {kind !== "live" ? <><label className={`file-input ${uploading ? "uploading" : ""}`}>{uploading ? `Uploading ${uploadProgress}%` : editingLessonId ? (kind === "video" ? "Choose a replacement video" : "Choose a replacement file") : kind === "video" ? "Choose a video file" : "Choose a PDF or image"}<input disabled={uploading} type="file" accept={kind === "video" ? "video/*" : ".pdf,image/*"} onChange={(event) => event.target.files?.[0] && void upload(event.target.files[0])} />{uploading ? <span style={{ width: `${uploadProgress}%` }} /> : null}</label>{uploadInfo ? <p className="upload-info">✓ {uploadInfo}</p> : editingLessonId ? <p className="upload-help">Choosing a new file replaces the current one; the lesson keeps its place in the list.</p> : <p className="upload-help">The original file stays behind signed-in course access.</p>}</> : <p className="upload-help">Only paid, active students in this course can see the live-room link.</p>}
         <div className="row-actions">
-          <button disabled={uploading || !canPublish} className="workspace-primary" onClick={() => void act(editingLessonId ? "editLesson" : "addLesson", editingLessonId ? { id: editingLessonId, title, kind, assetUrl, duration, sectionType } : { courseId, title, kind, assetUrl, duration, sectionType }).then((ok) => { if (ok) resetForm(); })}>{editingLessonId ? "Save changes" : "Add to course"} <span>↗</span></button>
+          <button disabled={uploading || !canPublish} className="workspace-primary" onClick={() => { if (editingLessonId) saveEdit(); else void act("addLesson", { courseId, title, kind, assetUrl, duration, sectionType }).then((ok) => { if (ok) resetForm(); }); }}>{editingLessonId ? "Save changes" : "Add to course"} <span>↗</span></button>
+          {!editingLessonId ? <button disabled={uploading || !canPublish} className="outline-button" onClick={queueLesson}>+ Add to queue</button> : null}
           {editingLessonId ? <button className="outline-button" onClick={resetForm}>Cancel edit</button> : null}
         </div>
       </div>
+      {queue.length ? <div className="lesson-queue"><p className="micro-label">QUEUED — NOT SAVED YET ({queue.length})</p><div className="mini-list">{queue.map((item, index) => <div key={index}><span>{item.kind === "video" ? "▶" : item.kind === "live" ? "●" : "□"}</span><p><b>{item.title}</b><small>{item.kind} · {item.duration || "No duration"}</small></p><div className="row-actions"><button className="danger-action" onClick={() => removeQueued(index)}>Remove</button></div></div>)}</div><button className="workspace-primary" disabled={submittingQueue} onClick={() => void submitQueue()}>{submittingQueue ? "Adding…" : `Add all ${queue.length} to course`} <span>↗</span></button></div> : null}
       {assetUrl && secureAsset ? <div className={`studio-preview ${kind}`}>{kind === "video" ? <video src={assetUrl} controls controlsList="nodownload noremoteplayback" disablePictureInPicture preload="metadata" /> : kind === "live" ? <><span>● LIVE PREVIEW</span><h3>{title || "Live session"}</h3><p>{duration || "Add the session time above"}</p><a href={assetUrl} target="_blank" rel="noreferrer">Test meeting link ↗</a></> : <><b>□</b><p>{title || "Protected file"}</p><small>The student will open this file inside the protected viewer.</small></>}</div> : null}
     </section>
     <section className="workspace-panel studio-library">

@@ -43,6 +43,13 @@ export async function POST(request: Request) {
           return Response.json({ error: "Choose your secondary school grade" }, { status: 400 });
         }
       }
+      // The single-device lock (lib/auth.ts: a student's session is invalidated the
+      // moment trusted_device_id no longer matches) already runs regardless of this
+      // checkbox — this just makes sure the student agreed to it up front instead of
+      // discovering it the first time they're signed out of an old device.
+      if (body.deviceConsent !== true && body.deviceConsent !== "on" && body.deviceConsent !== "true") {
+        return Response.json({ error: "Please confirm the single-device sign-in notice to continue" }, { status: 400 });
+      }
     }
     // Instructors skip education-stage entirely — that field only describes students.
 
@@ -59,9 +66,9 @@ export async function POST(request: Request) {
     // can create/publish courses, which is a separate, unrelated check.
     const initialStatus = role === "student" ? "approved" : "pending";
     const user = await one<{ id: number; email: string; role: PlatformRole }>(
-      `INSERT INTO users (email,password_hash,name,phone,whatsapp,alt_phone,guardian_phone,city,stage,level,college_id,university_id,year_id,role,status,trusted_device_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id,email,role`,
-      [email, passwordHash, name, phone, clean(body.whatsapp, 30), clean(body.altPhone, 30), clean(body.guardianPhone, 30), clean(body.city, 80), stageValue, level, collegeId, universityId, yearId, role, initialStatus, deviceId],
+      `INSERT INTO users (email,password_hash,name,phone,whatsapp,alt_phone,guardian_phone,city,stage,level,college_id,university_id,year_id,role,status,trusted_device_id,device_consent_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id,email,role`,
+      [email, passwordHash, name, phone, clean(body.whatsapp, 30), clean(body.altPhone, 30), clean(body.guardianPhone, 30), clean(body.city, 80), stageValue, level, collegeId, universityId, yearId, role, initialStatus, deviceId, role === "student" ? new Date() : null],
     );
     if (!user) throw new Error("Account could not be created");
     await createSession(user, deviceId);

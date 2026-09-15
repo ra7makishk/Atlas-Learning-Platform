@@ -67,6 +67,7 @@ export default function AuthForm({ mode, token = "", audience }: { mode: Mode; t
           <label>University<select name="universityId" required disabled={!collegeId} value={universityId} onChange={(event) => { setUniversityId(event.target.value); setYearId(""); }}><option value="" disabled>Choose your university</option>{universities.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
           <label>Year<select name="yearId" required disabled={!universityId} value={yearId} onChange={(event) => setYearId(event.target.value)}><option value="" disabled>Choose your year</option>{years.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
         </>}
+        <label className="remember-me-field device-consent-field"><input name="deviceConsent" type="checkbox" required /> I understand my account can only be signed in on one device at a time. Signing in on a new device will require approval and may sign me out of the old one.</label>
       </>}
     </>}
     {mode !== "reset" && <label>Email address<input name="email" required type="email" autoComplete="email" /></label>}

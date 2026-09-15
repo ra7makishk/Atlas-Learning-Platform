@@ -219,6 +219,8 @@ button, input, textarea, select { font: inherit; }
 .control-form .wide { grid-column: 1 / -1; }
 .control-form .remember-me-field { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 9px; }
 .control-form .remember-me-field input[type="checkbox"] { display: inline-block; width: auto; margin-top: 0; flex-shrink: 0; }
+.control-form .device-consent-field { align-items: flex-start; line-height: 1.5; }
+.control-form .device-consent-field input[type="checkbox"] { margin-top: 3px; }
 .subject-picker { border: 1px solid #cbc7be; padding: 10px 12px; max-height: 360px; overflow-y: auto; }
 .subject-picker details { margin: 4px 0; }
 .subject-picker summary { cursor: pointer; font-size: 9px; font-weight: 900; text-transform: uppercase; letter-spacing: .08em; padding: 4px 0; }

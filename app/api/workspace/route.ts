@@ -310,6 +310,39 @@ if (action === "unlockSubject") {
       return Response.json({ ok: true }, { status: 201 });
     }
 
+    if (action === "addLessons") {
+      // Bulk version of addLesson — queue several pieces of material client-side
+      // (see ContentStudio's "queue" list) and commit them together in one request
+      // instead of one add-then-reload round trip per lesson.
+      if (!["admin", "instructor"].includes(user.role)) return Response.json({ error: "Instructor access required" }, { status: 403 });
+      const courseId = Number(data.courseId);
+      const course = await one<{ instructor_email: string }>("SELECT instructor_email FROM courses WHERE id=$1", [courseId]);
+      if (!course || (user.role === "instructor" && course.instructor_email !== user.email)) return Response.json({ error: "You cannot edit this course" }, { status: 403 });
+      const incoming = Array.isArray(data.lessons) ? data.lessons as Record<string, unknown>[] : [];
+      if (!incoming.length) return Response.json({ error: "Add at least one lesson" }, { status: 400 });
+      if (incoming.length > 50) return Response.json({ error: "Add at most 50 lessons at once" }, { status: 400 });
+      const prepared: { title: string; kind: string; assetUrl: string; duration: string; sectionType: string }[] = [];
+      for (const [index, entry] of incoming.entries()) {
+        const title = clean(entry.title, 160), kind = clean(entry.kind, 30) || "video", assetUrl = clean(entry.assetUrl, 500), duration = clean(entry.duration, 80);
+        const sectionType = clean(entry.sectionType, 40) || "full_curriculum";
+        if (!title || !["video", "live", "file"].includes(kind)) return Response.json({ error: `Lesson ${index + 1}: a title and a valid type are required` }, { status: 400 });
+        if (!assetUrl || !validAssetUrl(assetUrl)) return Response.json({ error: `Lesson ${index + 1}: ${kind === "live" ? "add a secure HTTPS meeting link" : "upload a file or add a secure HTTPS media link"}` }, { status: 400 });
+        if (kind === "live" && !duration) return Response.json({ error: `Lesson ${index + 1}: add the live session date and time` }, { status: 400 });
+        if (!planTypes.includes(sectionType)) return Response.json({ error: `Lesson ${index + 1}: invalid section type` }, { status: 400 });
+        prepared.push({ title, kind, assetUrl, duration, sectionType });
+      }
+      const order = await one<{ total: number }>("SELECT COUNT(*)::int AS total FROM lessons WHERE course_id=$1", [courseId]);
+      let nextOrder = Number(order?.total || 0);
+      await withTransaction(async (client) => {
+        for (const lesson of prepared) {
+          nextOrder += 1;
+          await client.query("INSERT INTO lessons (course_id,title,kind,asset_url,duration,section_type,sort_order) VALUES ($1,$2,$3,$4,$5,$6,$7)", [courseId, lesson.title, lesson.kind, lesson.assetUrl, lesson.duration, lesson.sectionType, nextOrder]);
+        }
+        await client.query(`INSERT INTO notifications (user_email,course_id,title,message) SELECT user_email,$1,$2,$3 FROM enrollments WHERE course_id=$1 AND payment_status='paid' AND status='active'`, [courseId, "New course material", `${prepared.length} new item${prepared.length > 1 ? "s" : ""} added to this course.`]);
+      });
+      return Response.json({ ok: true, added: prepared.length }, { status: 201 });
+    }
+
     if (action === "editLesson") {
       if (!["admin", "instructor"].includes(user.role)) return Response.json({ error: "Instructor access required" }, { status: 403 });
       const id = Number(data.id);

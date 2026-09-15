@@ -557,3 +557,5 @@ body { background: var(--paper); color: var(--ink); }
 @media(max-width:800px){.instructor-grid{grid-template-columns:1fr}.access-code-list article,.activate-row{grid-template-columns:1fr}}.waiting-room { border-inline-start: 4px solid #d9a441; margin-bottom: 24px; }
 .waiting-room p { font-size: 10px; color: #6b6b6b; margin: 6px 0 16px; max-width: 640px; }
 .waiting-room .dashboard-course-list article { opacity: .75; }
+.lesson-queue { margin-top: 18px; padding-top: 18px; border-top: 1px dashed #cbd5d5; }
+.lesson-queue .mini-list { margin-bottom: 14px; }

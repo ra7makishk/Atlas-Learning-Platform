@@ -51,9 +51,9 @@ export async function POST(request: Request) {
     const passwordHash = await bcrypt.hash(password, 12);
     const deviceId = await getOrCreateDeviceId();
     const user = await one<{ id: number; email: string; role: PlatformRole }>(
-      `INSERT INTO users (email,password_hash,name,phone,whatsapp,country,city,specialty,stage,level,college_id,university_id,year_id,role,status,trusted_device_id)
+      `INSERT INTO users (email,password_hash,name,phone,whatsapp,alt_phone,guardian_phone,city,stage,level,college_id,university_id,year_id,role,status,trusted_device_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'pending',$15) RETURNING id,email,role`,
-      [email, passwordHash, name, phone, clean(body.whatsapp, 30), clean(body.country, 80), clean(body.city, 80), clean(body.specialty, 160), stageValue, level, collegeId, universityId, yearId, role, deviceId],
+      [email, passwordHash, name, phone, clean(body.whatsapp, 30), clean(body.altPhone, 30), clean(body.guardianPhone, 30), clean(body.city, 80), stageValue, level, collegeId, universityId, yearId, role, deviceId],
     );
     if (!user) throw new Error("Account could not be created");
     await createSession(user, deviceId);

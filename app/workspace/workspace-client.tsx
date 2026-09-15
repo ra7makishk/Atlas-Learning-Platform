@@ -477,12 +477,15 @@ function CourseForm({ data, setData, onSave, role }: { data: Record<string, unkn
 
 function StudentManager({ users, enrollments, academic, role, act }: { users: AnyRow[]; enrollments: AnyRow[]; academic: AcademicData; role: string; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
   const students = users.filter((user) => user.role === "student");
+  const [viewing, setViewing] = useState<AnyRow | null>(null);
   const placement = (student: AnyRow) => {
     const university = academic.universities.find((row) => row.id === Number(student.universityId));
     const year = academic.years.find((row) => row.id === Number(student.yearId));
     return university && year ? `${university.nameEn} · ${year.nameEn}` : "Academic placement not set";
   };
-  return <section className="workspace-panel"><div className="panel-heading"><div><p>APPLICATION REVIEW</p><h2>Student profiles</h2></div><span className="status-chip">{students.filter((user) => user.status === "pending").length} pending</span></div>{students.length ? <div className="data-table student-table">{students.map((student) => <article key={String(student.email)}><div className="student-avatar">{String(student.name || student.email).slice(0, 2).toUpperCase()}</div><div><b>{String(student.name)}</b><small>{String(student.email)}</small></div><div><b>{String(student.phone || "No phone")}</b><small>{String(student.city || "City not added")} · {String(student.country || "Country not added")}</small></div><div><b>{placement(student)}</b><small>{enrollments.filter((row) => row.user_email === student.email).length} enrollments</small></div><span className={`review-status ${String(student.status)}`}>{String(student.status)}</span><div className="row-actions"><button onClick={() => void act("reviewUser", { email: student.email, status: "approved" })}>Approve</button><button onClick={() => void act("reviewUser", { email: student.email, status: "needs_changes" })}>Changes</button></div></article>)}</div> : <EmptyState>New student applications will appear here.</EmptyState>}</section>;
+  return <section className="workspace-panel"><div className="panel-heading"><div><p>APPLICATION REVIEW</p><h2>Student profiles</h2></div><span className="status-chip">{students.filter((user) => user.status === "pending").length} pending</span></div>{students.length ? <div className="data-table student-table">{students.map((student) => <article key={String(student.email)}><div className="student-avatar">{String(student.name || student.email).slice(0, 2).toUpperCase()}</div><div><button type="button" className="student-name-link" onClick={() => setViewing(student)}>{String(student.name)}</button><small>{String(student.email)}</small></div><div><b>{String(student.phone || "No phone")}</b><small>{String(student.city || "City not added")} · {String(student.country || "Country not added")}</small></div><div><b>{placement(student)}</b><small>{enrollments.filter((row) => row.user_email === student.email).length} enrollments</small></div><span className={`review-status ${String(student.status)}`}>{String(student.status)}</span><div className="row-actions"><button onClick={() => void act("reviewUser", { email: student.email, status: "approved" })}>Approve</button><button onClick={() => void act("reviewUser", { email: student.email, status: "needs_changes" })}>Changes</button></div></article>)}</div> : <EmptyState>New student applications will appear here.</EmptyState>}
+    {viewing && <div className="profile-viewer-overlay" onClick={() => setViewing(null)}><div className="profile-viewer-panel" onClick={(event) => event.stopPropagation()}><button type="button" className="profile-viewer-close" onClick={() => setViewing(null)}>✕ Close</button><ProfileForm user={viewing as unknown as PlatformUser} academic={academic} act={act} adminView onClose={() => setViewing(null)} /></div></div>}
+  </section>;
 }
 
 function PaymentManager({ payments, act }: { payments: AnyRow[]; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
@@ -687,7 +690,7 @@ const HIGH_SCHOOL_GRADES: { value: string; label: string }[] = [
   { value: "third_secondary", label: "Third Secondary" },
 ];
 
-function ProfileForm({ user, academic, act }: { user: PlatformUser; academic: AcademicData; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
+function ProfileForm({ user, academic, act, adminView, onClose }: { user: PlatformUser; academic: AcademicData; act: (action: string, data: Record<string, unknown>) => Promise<boolean>; adminView?: boolean; onClose?: () => void }) {
   const [form, setForm] = useState({ name: user.name || "", phone: user.phone || "", whatsapp: user.whatsapp || "", country: user.country || "", city: user.city || "", specialty: user.specialty || "" });
   const [stage, setStage] = useState(user.stage || "");
   const [level, setLevel] = useState(user.level || "");
@@ -696,7 +699,11 @@ function ProfileForm({ user, academic, act }: { user: PlatformUser; academic: Ac
   const [yearId, setYearId] = useState(user.yearId ? String(user.yearId) : "");
   const universities = academic.universities.filter((row) => String(row.collegeId) === collegeId);
   const years = academic.years.filter((row) => String(row.universityId) === universityId);
-  const submit = (event: React.FormEvent) => { event.preventDefault(); void act("profile", { ...form, stage, level: stage === "high_school" ? level : "", collegeId: stage === "university" ? Number(collegeId) : null, universityId: stage === "university" ? Number(universityId) : null, yearId: stage === "university" ? Number(yearId) : null }); };
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void act("profile", { ...form, stage, level: stage === "high_school" ? level : "", collegeId: stage === "university" ? Number(collegeId) : null, universityId: stage === "university" ? Number(universityId) : null, yearId: stage === "university" ? Number(yearId) : null, ...(adminView ? { email: user.email } : {}) })
+      .then((ok) => { if (ok && adminView && onClose) onClose(); });
+  };
   return <section className="workspace-panel profile-form"><div className="panel-heading"><div><p>STUDENT DETAILS</p><h2>Clear, reviewable information</h2></div></div><form className="control-form two-column" onSubmit={submit}>{Object.entries({ name: "Full legal name", phone: "Phone number", whatsapp: "WhatsApp number", country: "Country", city: "City", specialty: "Field of study / work" }).map(([name, label]) => <label key={name}>{label}<input required={["name", "phone"].includes(name)} value={form[name as keyof typeof form]} onChange={(event) => setForm({ ...form, [name]: event.target.value })} /></label>)}
     <label>Education stage<select required value={stage} onChange={(event) => { setStage(event.target.value); setCollegeId(""); setUniversityId(""); setYearId(""); setLevel(""); }}><option value="" disabled>Choose your stage</option><option value="high_school">High school</option><option value="university">University</option><option value="graduate">Graduate</option></select></label>
     {stage === "high_school" && <label>Grade<select required value={level} onChange={(event) => setLevel(event.target.value)}><option value="" disabled>Choose your grade</option>{HIGH_SCHOOL_GRADES.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label>}
@@ -705,7 +712,7 @@ function ProfileForm({ user, academic, act }: { user: PlatformUser; academic: Ac
       <label>University<select required disabled={!collegeId} value={universityId} onChange={(event) => { setUniversityId(event.target.value); setYearId(""); }}><option value="" disabled>Choose your university</option>{universities.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
       <label>Year<select required disabled={!universityId} value={yearId} onChange={(event) => setYearId(event.target.value)}><option value="" disabled>Choose your year</option>{years.map((row) => <option key={row.id} value={String(row.id)}>{row.nameEn}</option>)}</select></label>
     </>}
-    <button className="workspace-primary wide" type="submit">Submit for review <span>↗</span></button></form></section>;
+    <button className="workspace-primary wide" type="submit">{adminView ? "Save changes" : "Submit for review"} <span>↗</span></button></form></section>;
 }
 
 function Discover({ courses, demoPayments, act }: { courses: AnyRow[]; demoPayments: boolean; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {

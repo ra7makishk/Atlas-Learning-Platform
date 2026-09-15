@@ -7,6 +7,8 @@ CREATE TABLE IF NOT EXISTS users (
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','needs_changes','blocked')),
   phone TEXT NOT NULL DEFAULT '',
   whatsapp TEXT NOT NULL DEFAULT '',
+  alt_phone TEXT NOT NULL DEFAULT '',
+  guardian_phone TEXT NOT NULL DEFAULT '',
   country TEXT NOT NULL DEFAULT '',
   city TEXT NOT NULL DEFAULT '',
   specialty TEXT NOT NULL DEFAULT '',

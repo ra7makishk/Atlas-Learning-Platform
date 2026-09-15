@@ -7,6 +7,8 @@ export type PlatformUser = {
   status: string;
   phone: string;
   whatsapp: string;
+  altPhone: string;
+  guardianPhone: string;
   country: string;
   city: string;
   specialty: string;

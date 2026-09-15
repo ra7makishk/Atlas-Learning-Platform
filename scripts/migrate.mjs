@@ -13,6 +13,8 @@ try {
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS level TEXT NOT NULL DEFAULT ''");
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS stage TEXT NOT NULL DEFAULT 'university'");
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_choice TEXT NOT NULL DEFAULT ''");
+  await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS alt_phone TEXT NOT NULL DEFAULT ''");
+  await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS guardian_phone TEXT NOT NULL DEFAULT ''");
   await client.query("ALTER TABLE messages ALTER COLUMN course_id DROP NOT NULL");
   await client.query("ALTER TABLE access_codes ALTER COLUMN student_email DROP NOT NULL");
   // Student's current academic placement (college/university/year/term). Informational

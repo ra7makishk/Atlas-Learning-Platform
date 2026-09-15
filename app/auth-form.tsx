@@ -15,14 +15,14 @@ const HIGH_SCHOOL_GRADES: { value: string; label: string }[] = [
   { value: "third_secondary", label: "Third Secondary" },
 ];
 
-export default function AuthForm({ mode, token = "" }: { mode: Mode; token?: string }) {
+export default function AuthForm({ mode, token = "", audience }: { mode: Mode; token?: string; audience?: AccountType }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [resetUrl, setResetUrl] = useState("");
   const [academic, setAcademic] = useState<Academic>({ colleges: [], universities: [], years: [] });
-  const [accountType, setAccountType] = useState<AccountType>("student");
+  const [accountType, setAccountType] = useState<AccountType>(audience || "student");
   const [stage, setStage] = useState<Stage>("");
   const [collegeId, setCollegeId] = useState("");
   const [universityId, setUniversityId] = useState("");
@@ -53,10 +53,12 @@ export default function AuthForm({ mode, token = "" }: { mode: Mode; token?: str
     finally { setBusy(false); }
   }
 
-  const title = mode === "login" ? "Welcome back." : mode === "register" ? "Create your account." : mode === "forgot" ? "Reset your password." : "Choose a new password.";
+  const title = mode === "login" ? (audience === "instructor" ? "Instructor sign in." : "Welcome back.") : mode === "register" ? (audience === "instructor" ? "Create your instructor account." : audience === "student" ? "Create your student account." : "Create your account.") : mode === "forgot" ? "Reset your password." : "Choose a new password.";
+  const loginPath = audience === "instructor" ? "/instructor/login" : "/login";
+  const registerPath = audience === "instructor" ? "/instructor/register" : "/register";
   return <main className="auth-screen"><section className="auth-card auth-form-card"><Link className="academy-brand" href="/" aria-label="4Z Academy home"><img src="/assets/4z-academy-logo.png" alt="4Z Academy" /></Link><p className="micro-label">4Z ACADEMY</p><h1>{title}</h1><form className="control-form" onSubmit={submit}>
-    {mode === "register" && <><label>Account type<select name="role" required value={accountType} onChange={(event) => setAccountType(event.target.value as AccountType)}><option value="student">Student</option><option value="instructor">Instructor</option></select></label>
-      <label>Full name<input name="name" required autoComplete="name" /></label><label>Phone number<input name="phone" required autoComplete="tel" /></label><div className="two-auth-fields"><label>WhatsApp<input name="whatsapp" autoComplete="tel" /></label><label>Country<input name="country" autoComplete="country-name" /></label></div><div className="two-auth-fields"><label>City<input name="city" /></label><label>Field of study / work<input name="specialty" /></label></div>
+    {mode === "register" && <>{audience && <input type="hidden" name="role" value={audience} />}{!audience && <label>Account type<select name="role" required value={accountType} onChange={(event) => setAccountType(event.target.value as AccountType)}><option value="student">Student</option><option value="instructor">Instructor</option></select></label>}
+      <label>Full name<input name="name" required autoComplete="name" /></label><label>Phone number<input name="phone" required autoComplete="tel" /></label><div className="two-auth-fields"><label>WhatsApp<input name="whatsapp" autoComplete="tel" /></label><label>Alternative phone number<input name="altPhone" autoComplete="tel" /></label></div><div className="two-auth-fields"><label>City<input name="city" /></label><label>Guardian&apos;s phone number<input name="guardianPhone" autoComplete="tel" /></label></div>
       {accountType === "student" && <>
         <label>Education stage<select name="stage" required value={stage} onChange={(event) => { setStage(event.target.value as Stage); setCollegeId(""); setUniversityId(""); setYearId(""); }}><option value="" disabled>Choose your stage</option><option value="high_school">High school</option><option value="university">University</option><option value="graduate">Graduate</option></select></label>
         {stage === "high_school" && <label>Grade<select name="level" required><option value="" disabled defaultValue="">Choose your grade</option>{HIGH_SCHOOL_GRADES.map((grade) => <option key={grade.value} value={grade.value}>{grade.label}</option>)}</select></label>}
@@ -72,5 +74,5 @@ export default function AuthForm({ mode, token = "" }: { mode: Mode; token?: str
     {mode === "login" && <label className="remember-me-field"><input name="rememberMe" type="checkbox" defaultChecked /> Remember me</label>}
     {error && <div className="form-error">{error}</div>}{message && <div className="form-success">{message}</div>}{resetUrl && <a className="dev-reset-link" href={resetUrl}>Open development reset link</a>}
     <button className="workspace-primary" disabled={busy}>{busy ? "Please wait…" : mode === "login" ? "Sign in" : mode === "register" ? "Create account" : mode === "forgot" ? "Request reset" : "Update password"}<span>↗</span></button>
-  </form><div className="auth-switch">{mode === "login" && <><Link href="/forgot-password">Forgot password?</Link><Link href="/register">Create account</Link></>}{mode === "register" && <Link href="/login">Already registered? Sign in</Link>}{mode === "reset" && <Link href="/login">Return to sign in</Link>}</div></section></main>;
+  </form><div className="auth-switch">{mode === "login" && <><Link href="/forgot-password">Forgot password?</Link><Link href={registerPath}>Create account</Link></>}{mode === "register" && <Link href={loginPath}>Already registered? Sign in</Link>}{mode === "reset" && <Link href={loginPath}>Return to sign in</Link>}</div></section></main>;
 }

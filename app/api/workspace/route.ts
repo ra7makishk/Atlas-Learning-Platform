@@ -113,7 +113,18 @@ export async function POST(request: Request) {
         if (!stageLevels.high_school.includes(level)) return Response.json({ error: "Choose your secondary school grade" }, { status: 400 });
       }
 
-      await pool.query(`UPDATE users SET name=$1,phone=$2,whatsapp=$3,country=$4,city=$5,specialty=$6,stage=$7,level=$8,college_id=$9,university_id=$10,year_id=$11,status=CASE WHEN status IN ('rejected','needs_changes') THEN 'pending' ELSE status END,updated_at=NOW() WHERE email=$12`, [name, phone, clean(data.whatsapp, 30), clean(data.country, 80), clean(data.city, 80), clean(data.specialty, 160), stage, level, collegeId, universityId, yearId, user.email]);
+      // An admin can edit a student's profile directly from the Students list;
+      // everyone else can only ever edit their own (targetEmail defaults to self).
+      let targetEmail = user.email;
+      if (data.email && user.role === "admin") {
+        targetEmail = clean(data.email, 160).toLowerCase();
+        if (!await one("SELECT email FROM users WHERE email=$1 AND role='student'", [targetEmail])) return Response.json({ error: "Student not found" }, { status: 404 });
+      }
+      // Only auto-clear a rejection/changes-requested status when a student edits
+      // their own profile in response to it — an admin edit shouldn't silently
+      // flip someone's review status.
+      const statusClause = targetEmail === user.email ? ",status=CASE WHEN status IN ('rejected','needs_changes') THEN 'pending' ELSE status END" : "";
+      await pool.query(`UPDATE users SET name=$1,phone=$2,whatsapp=$3,country=$4,city=$5,specialty=$6,stage=$7,level=$8,college_id=$9,university_id=$10,year_id=$11${statusClause},updated_at=NOW() WHERE email=$12`, [name, phone, clean(data.whatsapp, 30), clean(data.country, 80), clean(data.city, 80), clean(data.specialty, 160), stage, level, collegeId, universityId, yearId, targetEmail]);
       return Response.json({ ok: true });
     }
 

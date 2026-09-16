@@ -561,3 +561,5 @@ body { background: var(--paper); color: var(--ink); }
 .waiting-room .dashboard-course-list article { opacity: .75; }
 .lesson-queue { margin-top: 18px; padding-top: 18px; border-top: 1px dashed #cbd5d5; }
 .lesson-queue .mini-list { margin-bottom: 14px; }
+.lesson-progress-bar { height: 3px; background: #e5e2da; margin-top: 6px; border-radius: 2px; overflow: hidden; }
+.lesson-progress-bar i { display: block; height: 100%; background: var(--ink, #1c1c1c); }

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PlatformUser } from "../../lib/types";
 
 type AnyRow = Record<string, string | number | boolean | null>;
@@ -28,10 +28,11 @@ type WorkspaceData = {
   academic: AcademicData;
   demoPayments: boolean;
   announcements: AnyRow[];
+  lessonProgress: AnyRow[];
 };
 
 const emptyAcademic: AcademicData = { colleges: [], universities: [], years: [], terms: [], subjects: [] };
-const emptyData: WorkspaceData = { user: {} as PlatformUser, courses: [], lessons: [], enrollments: [], notifications: [], messages: [], mediaAssets: [], users: [], payments: [], deviceRequests: [], accessCodes: [], subjectLocks: [], academic: emptyAcademic, demoPayments: false, announcements: [] };
+const emptyData: WorkspaceData = { user: {} as PlatformUser, courses: [], lessons: [], enrollments: [], notifications: [], messages: [], mediaAssets: [], users: [], payments: [], deviceRequests: [], accessCodes: [], subjectLocks: [], academic: emptyAcademic, demoPayments: false, announcements: [], lessonProgress: [] };
 
 const labels = {
   en: { overview: "Overview", courses: "Courses", studio: "Video & live", instructors: "Instructors", access: "Access codes", students: "Students", payments: "Payments", devices: "Devices", messages: "Messages", learning: "My learning", activate: "Activate code", discover: "Discover", notifications: "Notifications", profile: "Profile", protection: "Player demo", academic: "Academic structure", announcements: "Site announcements", requests: "Access requests" },
@@ -243,7 +244,7 @@ export default function WorkspaceClient({ initialUser, signOutHref }: { initialU
         {!busy && active === "payments" && role === "admin" && <PaymentManager payments={data.payments} act={act} />}
         {!busy && active === "devices" && role === "admin" && <DeviceManager rows={data.deviceRequests} act={act} />}
         {!busy && !instructorPending && active === "protection" && role !== "student" && <ProtectedPlayer name={data.user.name} email={data.user.email} />}
-        {!busy && !needsOnboarding && active === "learning" && role === "student" && data.user.status === "approved" && <MyLearning data={data} />}
+        {!busy && !needsOnboarding && active === "learning" && role === "student" && data.user.status === "approved" && <MyLearning data={data} act={act} />}
         {!busy && !needsOnboarding && active === "activate" && role === "student" && data.user.status === "approved" && <ActivateCode accessCodes={data.accessCodes} act={act} />}
         {!busy && !needsOnboarding && active === "discover" && role === "student" && data.user.status === "approved" && <Discover courses={data.courses} demoPayments={data.demoPayments} announcements={data.announcements} act={act} />}
         {!busy && !needsOnboarding && active === "notifications" && (role !== "student" || data.user.status === "approved") && <Notifications rows={data.notifications} act={act} />}
@@ -814,7 +815,7 @@ function Discover({ courses, demoPayments, announcements, act }: { courses: AnyR
   })}</div></div>;
 }
 
-function MyLearning({ data }: { data: WorkspaceData }) {
+function MyLearning({ data, act }: { data: WorkspaceData; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {
   const active = data.courses.filter((course) => course.paymentStatus === "paid" && course.enrollmentStatus === "active");
   const waiting = data.courses.filter((course) => course.enrollmentStatus === "awaiting_review");
   const [selected, setSelected] = useState<number | null>(active[0] ? Number(active[0].id) : null);
@@ -825,16 +826,17 @@ function MyLearning({ data }: { data: WorkspaceData }) {
   const source = String(opened?.asset_url || "");
   const asset = data.mediaAssets.find((row) => String(row.url) === source);
   const inferredMime = String(asset?.mimeType || (source.match(/\.pdf(?:$|\?)/i) ? "application/pdf" : source.match(/\.(png|jpe?g|gif|webp)(?:$|\?)/i) ? "image/*" : opened?.kind === "video" ? "video/*" : ""));
+  const trackProgress = (watchedSeconds: number, durationSeconds: number) => { if (opened) void act("trackProgress", { lessonId: Number(opened.id), watchedSeconds, durationSeconds }); };
   const waitingRoom = waiting.length ? <section className="workspace-panel waiting-room"><div className="panel-heading"><div><p>AWAITING REVIEW</p><h2>{waiting.length} course{waiting.length > 1 ? "s" : ""} waiting on the instructor</h2></div></div><p>Your access code was accepted — the instructor for each course below still needs to review your profile before you can start watching. You&apos;ll get a notification the moment it&apos;s approved.</p><div className="dashboard-course-list">{waiting.map((course) => <article key={String(course.id)}><img src={String(value(course, "imageUrl", "image_url"))} alt="" /><div><small>{String(value(course, "instructorName", "instructor_name"))}</small><h3>{String(value(course, "titleEn", "title_en"))}</h3><p>Waiting for instructor review</p></div></article>)}</div></section> : null;
   if (!active.length) return <>{waitingRoom}<EmptyState>Your paid courses will appear here. Open Discover to choose your first course.</EmptyState></>;
-  return <>{waitingRoom}<div className="learning-layout"><aside>{active.map((course) => <button key={String(course.id)} className={selected === Number(course.id) ? "active" : ""} onClick={() => { setSelected(Number(course.id)); setLessonId(null); }}><img src={String(value(course, "imageUrl", "image_url"))} alt="" /><span><b>{String(value(course, "titleEn", "title_en"))}</b><small>{Number(course.progress || 0)}% complete</small></span></button>)}</aside><section>{chosen && <><p className="micro-label">PROTECTED COURSE ROOM</p><h2>{String(value(chosen, "titleEn", "title_en"))}</h2><LearningViewer lesson={opened} source={source} mimeType={inferredMime} name={data.user.name} email={data.user.email} /><div className="lesson-list">{lessons.map((lesson, index) => <article className={Number(opened?.id) === Number(lesson.id) ? "active" : ""} key={String(lesson.id)}><span>{String(index + 1).padStart(2, "0")}</span><div><b>{String(lesson.title)}</b><small>{String(lesson.kind)} · {String(lesson.duration || "View in platform")}</small></div>{lesson.asset_url ? <button onClick={() => setLessonId(Number(lesson.id))}>{lesson.kind === "file" ? "Open" : lesson.kind === "live" ? "Details" : "Play"}</button> : <button disabled>Coming soon</button>}</article>)}</div></>}</section></div></>;
+  return <>{waitingRoom}<div className="learning-layout"><aside>{active.map((course) => <button key={String(course.id)} className={selected === Number(course.id) ? "active" : ""} onClick={() => { setSelected(Number(course.id)); setLessonId(null); }}><img src={String(value(course, "imageUrl", "image_url"))} alt="" /><span><b>{String(value(course, "titleEn", "title_en"))}</b><small>{Number(course.progress || 0)}% complete</small></span></button>)}</aside><section>{chosen && <><p className="micro-label">PROTECTED COURSE ROOM</p><h2>{String(value(chosen, "titleEn", "title_en"))}</h2><LearningViewer key={String(opened?.id || "none")} lesson={opened} source={source} mimeType={inferredMime} name={data.user.name} email={data.user.email} onProgress={trackProgress} /><div className="lesson-list">{lessons.map((lesson, index) => { const watched = data.lessonProgress.find((row) => Number(row.lessonId) === Number(lesson.id)); const percent = lesson.kind === "video" ? Math.min(100, Number(watched?.percent || 0)) : null; return <article className={Number(opened?.id) === Number(lesson.id) ? "active" : ""} key={String(lesson.id)}><span>{String(index + 1).padStart(2, "0")}</span><div><b>{String(lesson.title)}</b><small>{String(lesson.kind)} · {String(lesson.duration || "View in platform")}{percent !== null ? ` · ${watched?.completed ? "Completed" : `${percent}% watched`}` : ""}</small>{percent !== null ? <div className="lesson-progress-bar"><i style={{ width: `${percent}%` }} /></div> : null}</div>{lesson.asset_url ? <button onClick={() => setLessonId(Number(lesson.id))}>{lesson.kind === "file" ? "Open" : lesson.kind === "live" ? "Details" : "Play"}</button> : <button disabled>Coming soon</button>}</article>; })}</div></>}</section></div></>;
 }
 
-function LearningViewer({ lesson, source, mimeType, name, email }: { lesson?: AnyRow; source: string; mimeType: string; name: string; email: string }) {
+function LearningViewer({ lesson, source, mimeType, name, email, onProgress }: { lesson?: AnyRow; source: string; mimeType: string; name: string; email: string; onProgress?: (watchedSeconds: number, durationSeconds: number) => void }) {
   if (!lesson) return <ProtectedPlayer name={name} email={email} compact />;
   if (lesson.kind === "live") return <section className="live-room-card"><span>● LIVE SESSION</span><h3>{String(lesson.title)}</h3><p>{String(lesson.duration || "The instructor will share the schedule here.")}</p>{source ? <a href={source} target="_blank" rel="noreferrer">Join live room ↗</a> : <button disabled>Meeting link coming soon</button>}</section>;
   if (lesson.kind === "file") return <ProtectedDocument source={source} mimeType={mimeType} title={String(lesson.title)} name={name} email={email} />;
-  return <ProtectedPlayer name={name} email={email} compact source={source} title={String(lesson.title)} />;
+  return <ProtectedPlayer name={name} email={email} compact source={source} title={String(lesson.title)} onProgress={onProgress} />;
 }
 
 function ProtectedDocument({ source, mimeType, title, name, email }: { source: string; mimeType: string; title: string; name: string; email: string }) {
@@ -843,9 +845,20 @@ function ProtectedDocument({ source, mimeType, title, name, email }: { source: s
   return <section className="document-viewer" onContextMenu={(event) => event.preventDefault()}><header><b>{title}</b><span>VIEW ONLY</span></header><div>{mimeType.startsWith("image/") ? <img src={source} alt={title} draggable={false} /> : <iframe src={`${source}#toolbar=0&navpanes=0`} title={title} />}<span className="moving-watermark">{stamp}</span></div></section>;
 }
 
-function ProtectedPlayer({ name, email, compact = false, source = "", title = "Protected course preview" }: { name: string; email: string; compact?: boolean; source?: string; title?: string }) {
+function ProtectedPlayer({ name, email, compact = false, source = "", title = "Protected course preview", onProgress }: { name: string; email: string; compact?: boolean; source?: string; title?: string; onProgress?: (watchedSeconds: number, durationSeconds: number) => void }) {
   const stamp = useMemo(() => `${name} · ${email.replace(/(.{2}).+(@.+)/, "$1***$2")}`, [name, email]);
-  return <section className={`player-demo ${compact ? "compact" : ""}`} onContextMenu={(event) => event.preventDefault()}><div className="player-screen">{source ? <video src={source} title={title} controls controlsList="nodownload noremoteplayback" disablePictureInPicture playsInline preload="metadata" /> : <><img src="/assets/course-tech.png" alt={title} draggable={false} /><button className="play-button" aria-label="Preview only">▶</button><div className="player-controls"><span>PREVIEW</span><i><b /></i><span>Original</span></div></>}<div className="player-shade" /><span className="brand-watermark">4Z ACADEMY · VIEW ONLY</span><span className="moving-watermark">{stamp}</span></div>{!compact && <div className="player-notes"><article><b>Dynamic identity</b><p>The signed-in student’s masked identity moves across each recorded lesson.</p></article><article><b>Private original file</b><p>Direct uploads play at their original quality. Adaptive 360p–1080p needs a streaming provider later.</p></article><article><b>Practical deterrence</b><p>Authorized playback, no download control, and a visible identity watermark reduce misuse.</p></article></div>}</section>;
+  const lastReported = useRef(0);
+  // Throttled so a normal watch session sends a handful of requests, not one per
+  // frame — every 10s of playback, plus a final report right when the video ends
+  // so "completed" (>=90% watched) lands immediately instead of waiting for the
+  // next tick.
+  const reportProgress = (video: HTMLVideoElement) => {
+    if (!onProgress || !Number.isFinite(video.duration) || video.duration <= 0) return;
+    if (video.currentTime - lastReported.current < 10 && video.currentTime < video.duration) return;
+    lastReported.current = video.currentTime;
+    onProgress(video.currentTime, video.duration);
+  };
+  return <section className={`player-demo ${compact ? "compact" : ""}`} onContextMenu={(event) => event.preventDefault()}><div className="player-screen">{source ? <video src={source} title={title} controls controlsList="nodownload noremoteplayback" disablePictureInPicture playsInline preload="metadata" onTimeUpdate={(event) => reportProgress(event.currentTarget)} onEnded={(event) => reportProgress(event.currentTarget)} /> : <><img src="/assets/course-tech.png" alt={title} draggable={false} /><button className="play-button" aria-label="Preview only">▶</button><div className="player-controls"><span>PREVIEW</span><i><b /></i><span>Original</span></div></>}<div className="player-shade" /><span className="brand-watermark">4Z ACADEMY · VIEW ONLY</span><span className="moving-watermark">{stamp}</span></div>{!compact && <div className="player-notes"><article><b>Dynamic identity</b><p>The signed-in student’s masked identity moves across each recorded lesson.</p></article><article><b>Private original file</b><p>Direct uploads play at their original quality. Adaptive 360p–1080p needs a streaming provider later.</p></article><article><b>Practical deterrence</b><p>Authorized playback, no download control, and a visible identity watermark reduce misuse.</p></article></div>}</section>;
 }
 
 function Notifications({ rows, act }: { rows: AnyRow[]; act: (action: string, data: Record<string, unknown>) => Promise<boolean> }) {

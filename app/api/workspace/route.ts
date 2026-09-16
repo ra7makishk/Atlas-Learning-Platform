@@ -36,6 +36,15 @@ export async function GET() {
       ? await rows("SELECT DISTINCT l.id,l.course_id,l.title,l.kind,l.asset_url,l.duration,l.section_type,l.sort_order,l.published,l.created_at FROM lessons l JOIN enrollments e ON e.course_id=l.course_id JOIN access_codes a ON a.course_id=l.course_id AND a.student_email=e.user_email WHERE e.user_email=$1 AND e.payment_status='paid' AND e.status='active' AND l.published=TRUE AND a.status='redeemed' AND NOW() BETWEEN a.available_from AND a.available_until AND (a.plan_type='full_curriculum' OR l.section_type=a.section_type) AND (SELECT COUNT(*) FROM lessons l2 WHERE l2.course_id=l.course_id AND (a.plan_type='full_curriculum' OR l2.section_type=a.section_type) AND (l2.sort_order<l.sort_order OR (l2.sort_order=l.sort_order AND l2.id<=l.id)))<=a.section_limit ORDER BY l.course_id,l.sort_order,l.id", [user.email])
       : await rows("SELECT l.* FROM lessons l JOIN courses c ON c.id=l.course_id WHERE $1='admin' OR c.instructor_email=$2 ORDER BY l.course_id,l.sort_order,l.id", [user.role, user.email]);
     const enrollments = await rows(`SELECT e.*,c.title_en AS "courseTitle",u.name AS "studentName" FROM enrollments e JOIN courses c ON c.id=e.course_id LEFT JOIN users u ON u.email=e.user_email WHERE $1='admin' OR e.user_email=$2 OR c.instructor_email=$3 ORDER BY e.id DESC`, [user.role, user.email, user.email]);
+    // Per-lesson watch percentage — separate from enrollments.progress, which is
+    // only the course-wide rollup. Instructors/admins see it for every student on
+    // their courses too (useful to spot who's stuck on which lesson).
+    const lessonProgress = await rows<{ lessonId: number; studentEmail: string; watchedSeconds: number; durationSeconds: number; completed: boolean; percent: number }>(
+      user.role === "student"
+        ? `SELECT lesson_id AS "lessonId",user_email AS "studentEmail",watched_seconds AS "watchedSeconds",duration_seconds AS "durationSeconds",completed,LEAST(100,ROUND(watched_seconds/NULLIF(duration_seconds,0)*100))::int AS percent FROM lesson_progress WHERE user_email=$1`
+        : `SELECT lp.lesson_id AS "lessonId",lp.user_email AS "studentEmail",lp.watched_seconds AS "watchedSeconds",lp.duration_seconds AS "durationSeconds",lp.completed,LEAST(100,ROUND(lp.watched_seconds/NULLIF(lp.duration_seconds,0)*100))::int AS percent FROM lesson_progress lp JOIN lessons l ON l.id=lp.lesson_id JOIN courses c ON c.id=l.course_id WHERE $1='admin' OR c.instructor_email=$2`,
+      user.role === "student" ? [user.email] : [user.role, user.email],
+    );
     const notifications = await rows(`SELECT n.*,c.title_en AS "courseTitle" FROM notifications n LEFT JOIN courses c ON c.id=n.course_id WHERE n.user_email=$1 ORDER BY n.id DESC LIMIT 50`, [user.email]);
     const messages = await rows(`SELECT m.*,c.title_en AS "courseTitle",s.name AS "senderName",r.name AS "receiverName" FROM messages m JOIN courses c ON c.id=m.course_id LEFT JOIN users s ON s.email=m.sender_email LEFT JOIN users r ON r.email=m.receiver_email WHERE m.sender_email=$1 OR m.receiver_email=$1 ORDER BY m.id ASC LIMIT 100`, [user.email]);
     const mediaAssets = user.role === "student"
@@ -81,7 +90,7 @@ export async function GET() {
         [user.collegeId, user.universityId, user.yearId, enrolledCourseIds],
       );
     }
-    return Response.json({ user, courses, lessons, enrollments, notifications, messages, mediaAssets, users, payments, deviceRequests, accessCodes, subjectLocks, academic, announcements, demoPayments: String(process.env.PAYMENT_PROVIDER || "manual").toLowerCase() === "demo" });
+    return Response.json({ user, courses, lessons, enrollments, notifications, messages, mediaAssets, users, payments, deviceRequests, accessCodes, subjectLocks, academic, announcements, lessonProgress, demoPayments: String(process.env.PAYMENT_PROVIDER || "manual").toLowerCase() === "demo" });
   } catch (error) { return apiError(error, "Workspace GET error"); }
 }
 
@@ -289,6 +298,43 @@ if (action === "unlockSubject") {
         await client.query("UPDATE enrollments SET payment_status=$1,status=$2 WHERE user_email=$3 AND course_id=$4", [status, status === "paid" ? "active" : "blocked", payment.user_email, payment.course_id]);
         for (const subjectId of subjectIds) await client.query("INSERT INTO subject_locks(student_email,subject_id,course_id) VALUES($1,$2,$3) ON CONFLICT(student_email,subject_id) DO NOTHING", [payment.user_email, subjectId, payment.course_id]);
         await client.query("INSERT INTO notifications (user_email,course_id,title,message) VALUES ($1,$2,$3,$4)", [payment.user_email, payment.course_id, "Payment status updated", `Your payment is now ${status}.`]);
+      });
+      return Response.json({ ok: true });
+    }
+
+    if (action === "trackProgress") {
+      // Reported by the video element's timeupdate/ended handlers in ProtectedPlayer
+      // (throttled client-side). Only accepted for a course the student actually has
+      // active access to — an awaiting_review or rejected enrollment can't inflate
+      // progress just by having the lesson id.
+      if (user.role !== "student") return Response.json({ error: "Student access required" }, { status: 403 });
+      const lessonId = Number(data.lessonId);
+      const watchedSeconds = Math.max(0, Number(data.watchedSeconds) || 0);
+      const durationSeconds = Math.max(0, Number(data.durationSeconds) || 0);
+      if (!Number.isInteger(lessonId) || !durationSeconds) return Response.json({ error: "Invalid progress report" }, { status: 400 });
+      const lesson = await one<{ course_id: number; kind: string }>("SELECT course_id,kind FROM lessons WHERE id=$1", [lessonId]);
+      if (!lesson || lesson.kind !== "video") return Response.json({ error: "Progress only applies to video lessons" }, { status: 400 });
+      const enrolled = await one("SELECT id FROM enrollments WHERE user_email=$1 AND course_id=$2 AND status='active'", [user.email, lesson.course_id]);
+      if (!enrolled) return Response.json({ error: "No active enrollment for this course" }, { status: 403 });
+      const completed = watchedSeconds >= durationSeconds * 0.9;
+      await withTransaction(async (client) => {
+        // Never let a rewind or a shorter re-open erase progress already recorded.
+        await client.query(
+          `INSERT INTO lesson_progress (user_email,lesson_id,watched_seconds,duration_seconds,completed,updated_at) VALUES ($1,$2,$3,$4,$5,NOW())
+           ON CONFLICT (user_email,lesson_id) DO UPDATE SET watched_seconds=GREATEST(lesson_progress.watched_seconds,EXCLUDED.watched_seconds),duration_seconds=EXCLUDED.duration_seconds,completed=lesson_progress.completed OR EXCLUDED.completed,updated_at=NOW()`,
+          [user.email, lessonId, watchedSeconds, durationSeconds, completed],
+        );
+        // Course-wide "watching %" = the share of that course's video lessons this
+        // student has completed. Lessons with no video (file/live) aren't part of
+        // the denominator since there's nothing to "watch" for them.
+        const rollup = await one<{ total: number; done: number }>(
+          `SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE lp.completed)::int AS done
+           FROM lessons l LEFT JOIN lesson_progress lp ON lp.lesson_id=l.id AND lp.user_email=$1
+           WHERE l.course_id=$2 AND l.kind='video'`,
+          [user.email, lesson.course_id],
+        );
+        const percent = rollup && rollup.total ? Math.round((rollup.done / rollup.total) * 100) : 0;
+        await client.query("UPDATE enrollments SET progress=GREATEST(progress,$1) WHERE user_email=$2 AND course_id=$3", [percent, user.email, lesson.course_id]);
       });
       return Response.json({ ok: true });
     }

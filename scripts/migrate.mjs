@@ -21,6 +21,18 @@ try {
   // itself (lib/auth.ts) still applies to them either way, this is just the record
   // of consent for accounts created after it was added.
   await client.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS device_consent_at TIMESTAMPTZ");
+  // Per-lesson watch time for videos — this is what "watching %" is actually computed
+  // from now; enrollments.progress is a derived rollup recalculated in trackProgress
+  // (app/api/workspace/route.ts) every time a student's watch position is reported.
+  await client.query(`CREATE TABLE IF NOT EXISTS lesson_progress (
+    user_email TEXT NOT NULL REFERENCES users(email) ON UPDATE CASCADE ON DELETE CASCADE,
+    lesson_id BIGINT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE,
+    watched_seconds NUMERIC(10,2) NOT NULL DEFAULT 0,
+    duration_seconds NUMERIC(10,2) NOT NULL DEFAULT 0,
+    completed BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_email, lesson_id)
+  )`);
   await client.query("ALTER TABLE messages ALTER COLUMN course_id DROP NOT NULL");
   await client.query("ALTER TABLE access_codes ALTER COLUMN student_email DROP NOT NULL");
   // Student's current academic placement (college/university/year/term). Informational
